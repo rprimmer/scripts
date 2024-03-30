@@ -20,7 +20,7 @@ display_lines() {
 
 remove_trailing_spaces() {
     echo "Removing trailing spaces from: $1"
-    perl -pi -e 's/[[:space:]]+$//' "$1"
+    perl -pi -e 's/[[:blank:]]+$//g' "$1"
 }
 
 for file in "$@"; do
@@ -35,22 +35,11 @@ for file in "$@"; do
         echo
 
         case $option in
-            d)
-                display_lines "$file"
-                ;;
-            r)
-                remove_trailing_spaces "$file"
-                ;;
-            s)
-                echo "Skipping $file"
-                ;;
-            x)
-                echo "Exiting..."
-                exit 0
-                ;;
-            *)
-                echo "Invalid option, skipping $file."
-                ;;
+            d)  display_lines "$file" ;;
+            r)  remove_trailing_spaces "$file" ;;
+            s)  echo "Skipping $file" ;;
+            x)  echo "Exiting..." ; exit 0 ;;
+            *)  echo "Invalid option, skipping $file." ;;
         esac
         echo
     else

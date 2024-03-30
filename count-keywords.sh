@@ -8,13 +8,8 @@ show_files=true
 
 while getopts ":t" opt; do
   case ${opt} in
-    t )
-      show_files=false
-      ;;
-    \? )
-      echo "Invalid option: $OPTARG" 1>&2
-      exit -1
-      ;;
+    t)  show_files=false ;;
+    \?) echo "Invalid option: $OPTARG" 1>&2 ; exit -1 ;;
   esac
 done
 shift $((OPTIND -1))
