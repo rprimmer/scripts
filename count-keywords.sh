@@ -9,7 +9,7 @@ show_files=true
 while getopts ":t" opt; do
   case ${opt} in
     t)  show_files=false ;;
-    \?) echo "Invalid option: $OPTARG" 1>&2 ; exit -1 ;;
+    \?) echo "Invalid option: $OPTARG" 1>&2 ; exit 1 ;;
   esac
 done
 shift $((OPTIND -1))
@@ -18,7 +18,7 @@ directory="$1"
 keyword="$2"
 
 if [[ -z "$directory" ]] || [[ -z "$keyword" ]]; then
-    echo "Usage: $(basename $0) [-t] <directory> <keyword>"
+    echo "Usage: $(basename "$0") [-t] <directory> <keyword>"
     exit 1
 fi
 
@@ -43,7 +43,7 @@ search_files() {
 search_files "$directory"
 
 if $show_files ; then
-    echo "Total occurrences of '$keyword' in all files: $total_count"
+    echo "Total occurrences of '$keyword' in all files: %d" $total_count
 else
-    printf "\nTotal occurrences of '$keyword' in all files: $total_count\n"
+    printf "\nTotal occurrences of '$keyword' in all files: %d\n" $total_count
 fi

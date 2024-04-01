@@ -41,4 +41,4 @@ if (index(ppid_list," "pid" ")!=0) {\
 		}\
 	}\
 }\
-' lookfor=$1
+' lookfor="$1"

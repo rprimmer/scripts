@@ -22,7 +22,7 @@ query() {
         ((nc++))
     done
  
-    if [  -z $ORIGNUM ]; then
+    if [  -z "$ORIGNUM" ]; then
         printf "%s " "$1"
         return
     fi
