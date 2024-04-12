@@ -7,7 +7,7 @@ usage: $(basename $0) [options] <arguments>
         -t Only display total occurrences and show a dot as a progress indicator for each file with occurrences
 
     ARGUMENTS
-        argument 1: directory to search
+        argument 1: directory tree to search
         argument 2: keyword to search for in files
 
 INFO
@@ -35,14 +35,13 @@ keyword="$2"
 [[ -z "$directory" ]] || [[ -z "$keyword" ]] && usage && exit 1
 
 directory="${directory%/}"
-keyword=""
-total_count=0
+declare -i total_count=0
 
 search_files() {
     for file in "$1"/*; do
         if [[ -f "$file" ]]; then
-            file_count=$(grep -Io "$keyword" "$file" | wc -l | xargs)
-            if [[ $file_count -gt 0 ]]; then
+            declare -i file_count=$(grep -Io "$keyword" "$file" | wc -l | xargs)
+            if (($file_count > 0)) ; then
                 if $show_files ; then
                     echo "$file: $file_count occurrences"
                 else
