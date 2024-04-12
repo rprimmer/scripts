@@ -1,9 +1,5 @@
 #!/usr/bin/env bash
 
-keyword=""
-total_count=0
-show_files=true
-
 usage() {
     cat << EOF 
 usage: $(basename $0) [options] <arguments>
@@ -14,13 +10,21 @@ usage: $(basename $0) [options] <arguments>
         argument 1: directory to search
         argument 2: keyword to search for in files
 
+INFO
+    This script walks a dir tree, checking each valid file for occurencens of <keyword>.
+    By default, the files that have <keyword> present will be displayed with a count.
+    The -t flag suppresses this output, instead showing progress dots for each file examined.
+    In both cases a grand total is displayed.
+
 EOF
 }
+
+show_files=true
 
 while getopts ":t" opt; do
   case ${opt} in
     t)  show_files=false ;;
-    ?)  echo "Invalid option: $OPTARG" 1>&2 ; exit 1 ;;
+    ?)  echo "Invalid option: $OPTARG" 1>&2 ; usage ; exit 1 ;;
   esac
 done
 shift $((OPTIND -1))
@@ -31,6 +35,8 @@ keyword="$2"
 [[ -z "$directory" ]] || [[ -z "$keyword" ]] && usage && exit 1
 
 directory="${directory%/}"
+keyword=""
+total_count=0
 
 search_files() {
     for file in "$1"/*; do
@@ -52,7 +58,7 @@ search_files() {
 
 search_files "$directory"
 
-if [[ "$show_files" == true ]]; then
+if $show_files ; then
     printf "Total occurrences of '$keyword' in all files: %d\n" $total_count
 else
     printf "\nTotal occurrences of '$keyword' in all files: %d\n" $total_count

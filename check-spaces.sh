@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
 
-# Check files for trailing spaces, optionally remove the trailing spaces or display as dots.
-# Useful for checking makefiles and markdown, where trailing spaces can cause issues.
-
 cleanup() {
     printf "\nInterrupt received. Exiting...\n"
     exit 1
@@ -11,18 +8,39 @@ cleanup() {
 trap cleanup SIGINT
 
 usage() {
-    cat << EOF 
-usage: $(basename $0) <file1> <filen>
+    cat <<EOF
+usage: $(basename $0) [OPTIONS] <arguments>
+    OPTIONS
+        -n  Run in non-interactive mode, automatically removing trailing spaces without prompting
+
+    ARGUMENTS
+        files to scan
+
+INFO
+    This script checks files for trailing spaces, optionally removing the trailing spaces or display as dots.
+    Run interactively by default. Use the -n flag to run in batch.
+    Useful for checking makefiles and markdown, where trailing spaces can cause issues.
+
 EOF
 }
 
 [[ $# = 0 ]] && usage && exit 1
 
+declare -i interactive=1 # Default to interactive mode
+
+while getopts ":n" opt; do
+    case ${opt} in
+        n)  interactive=0 ;;
+        ?)  echo "Invalid option: $OPTARG" 1>&2 ; usage ; exit 1 ;;
+    esac
+done
+shift $((OPTIND - 1))
+
 declare -a stat_cmd
 if [[ $(uname) == "Darwin" ]]; then
-    stat_cmd=(stat -f %z)  # macOS
+    stat_cmd=(stat -f %z) # macOS
 else
-    stat_cmd=(stat -c %s)  # Linux et al.
+    stat_cmd=(stat -c %s) # Linux et al.
 fi
 
 check_trailing_spaces() {
@@ -45,7 +63,6 @@ remove_trailing_spaces() {
     perl -pi -e 's/[[:blank:]]+$//g' "$1"
 }
 
-
 for file in "$@"; do
     if [ ! -f "$file" ] || [ ! -r "$file" ]; then
         echo "Error: File is missing or not readable - $file"
@@ -59,29 +76,33 @@ for file in "$@"; do
     fi
 
     filesize=$("${stat_cmd[@]}" "$file")
-    if (( filesize > 10000000 )); then  # 10 MB size limit
+    if ((filesize > 10000000)); then
         echo "Error: File size exceeds 10MB limit - $file"
         continue
     fi
 
     if check_trailing_spaces "$file"; then
-        echo "Trailing spaces found in: $file"
-        echo "Options for $file:"
-        echo "  [d] Display lines with trailing spaces"
-        echo "  [r] Remove trailing spaces"
-        echo "  [s] Skip file"
-        echo "  [x] Exit"
-        read -p "Choose an option [d/r/s/x]: " -n 1 -r option
-        echo
+        if ((interactive)); then
+            echo "Trailing spaces found in: $file"
+            echo "Options for $file:"
+            echo "  [d] Display lines with trailing spaces"
+            echo "  [r] Remove trailing spaces"
+            echo "  [s] Skip file"
+            echo "  [x] Exit"
+            read -p "Choose an option [d/r/s/x]: " -n 1 -r option
+            echo
 
-        case $option in
-            d)  display_lines "$file" ;;
-            r)  remove_trailing_spaces "$file" ;;
-            s)  echo "Skipping $file" ;;
-            x)  echo "Exiting..." ; exit 0 ;;
-            *)  echo "Invalid option, skipping $file." ;;
-        esac
-        echo
+            case $option in
+                d) display_lines "$file" ;;
+                r) remove_trailing_spaces "$file" ;;
+                s) echo "Skipping $file" ;;
+                x) echo "Exiting..." ; exit 0 ;;
+                *) echo "Invalid option, skipping $file." ;;
+            esac
+            echo
+        else
+            remove_trailing_spaces "$file"
+        fi
     else
         echo "No trailing spaces found in: $file"
     fi
