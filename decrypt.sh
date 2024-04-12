@@ -31,7 +31,7 @@ boolean_query() {
 TARGET=$1
 
 # Decryption path
-if [ $(basename "$0") = "decrypt" ]  ;  then
+if [ $(basename "$0") = "decrypt.sh" ]  ;  then
     echo Decrypting "$TARGET"
     $BCRYPT "$TARGET"
     [[ $? -ne 0 ]] && { echo "bcrypt failed!"; exit $?; }

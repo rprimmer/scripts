@@ -4,12 +4,23 @@ keyword=""
 total_count=0
 show_files=true
 
-# -t: Only display total occurrences and show a dot as a progress indicator for each file with occurrences.
+usage() {
+    cat << EOF 
+usage: $(basename $0) [options] <arguments>
+    OPTIONS
+        -t Only display total occurrences and show a dot as a progress indicator for each file with occurrences
+
+    ARGUMENTS
+        argument 1: directory to search
+        argument 2: keyword to search for in files
+
+EOF
+}
 
 while getopts ":t" opt; do
   case ${opt} in
     t)  show_files=false ;;
-    \?) echo "Invalid option: $OPTARG" 1>&2 ; exit 1 ;;
+    ?)  echo "Invalid option: $OPTARG" 1>&2 ; exit 1 ;;
   esac
 done
 shift $((OPTIND -1))
@@ -17,10 +28,9 @@ shift $((OPTIND -1))
 directory="$1"
 keyword="$2"
 
-if [[ -z "$directory" ]] || [[ -z "$keyword" ]]; then
-    echo "Usage: $(basename "$0") [-t] <directory> <keyword>"
-    exit 1
-fi
+[[ -z "$directory" ]] || [[ -z "$keyword" ]] && usage && exit 1
+
+directory="${directory%/}"
 
 search_files() {
     for file in "$1"/*; do
@@ -42,8 +52,8 @@ search_files() {
 
 search_files "$directory"
 
-if $show_files ; then
-    echo "Total occurrences of '$keyword' in all files: %d" $total_count
+if [[ "$show_files" == true ]]; then
+    printf "Total occurrences of '$keyword' in all files: %d\n" $total_count
 else
     printf "\nTotal occurrences of '$keyword' in all files: %d\n" $total_count
 fi
