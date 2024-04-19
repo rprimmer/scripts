@@ -1,3 +1,4 @@
-examples/change-file-suffix.sh
-examples/getops-andusage.sh
-examples/getops-and-usage.sh
+examples
+specs
+foo
+link_scripts.sh-*
