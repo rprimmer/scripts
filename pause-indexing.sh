@@ -9,6 +9,7 @@ usage() {
     echo "Actions:"
     echo "  pause         Pause indexing service"
     echo "  resume        Resume indexing service"
+    echo "  status        Display indexing status"
     echo
     echo "Example:"
     echo "  $(basename "$0") pause"
@@ -24,6 +25,8 @@ if [[ "$1" = "pause" ]]; then
     sudo mdutil -i off
 elif [[ "$1" = "resume" ]]; then
     sudo mdutil -i on
+elif [[ "$1" = "status" ]]; then
+    sudo mdutil -s /System/Volumes/Data
 else 
     usage
 fi

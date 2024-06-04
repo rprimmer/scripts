@@ -1,0 +1,1 @@
+../obsidian/add_calendar_to_obsidian.sh

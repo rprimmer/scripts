@@ -2,7 +2,10 @@ This file has been automatically generated using the following command:
 
 	git log --pretty=format:'%h %d %ai - %s'
 
-54eaf48  (HEAD -> main, origin/main) Fri Apr 12 13:40:52 2024 -0400 - nits
+e3a184b  (HEAD -> main, origin/main) Fri Apr 19 15:01:48 2024 -0400 - remove create-syms-2.sh
+cb0cdc5  Fri Apr 19 15:00:21 2024 -0400 - v1 of link_scripts.sh
+764b77a  Wed Apr 17 10:06:40 2024 -0400 - added create-changelog.sh
+54eaf48  Fri Apr 12 13:40:52 2024 -0400 - nits
 6253a1c  Fri Apr 12 13:19:52 2024 -0400 - v2
 57a6d23  Fri Apr 12 11:45:49 2024 -0400 - Add robustness checks
 d46042e  Mon Apr 1 09:11:02 2024 -0400 - shellcheck lints
