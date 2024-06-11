@@ -2,7 +2,8 @@ This file has been automatically generated using the following command:
 
 	git log --pretty=format:'%h %d %ai - %s'
 
-e3a184b  (HEAD -> main, origin/main) Fri Apr 19 15:01:48 2024 -0400 - remove create-syms-2.sh
+f957dd6  (HEAD -> main, origin/main) Tue Jun 4 08:37:51 2024 -0400 - Updates
+e3a184b  Fri Apr 19 15:01:48 2024 -0400 - remove create-syms-2.sh
 cb0cdc5  Fri Apr 19 15:00:21 2024 -0400 - v1 of link_scripts.sh
 764b77a  Wed Apr 17 10:06:40 2024 -0400 - added create-changelog.sh
 54eaf48  Fri Apr 12 13:40:52 2024 -0400 - nits
