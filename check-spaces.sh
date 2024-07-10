@@ -18,7 +18,7 @@ usage: $(basename $0) [OPTIONS] <arguments>
 
 INFO
     This script checks files for trailing spaces, optionally removing the trailing spaces or display as dots.
-    Run interactively by default. Use the -n flag to run in batch.
+    Runs interactively by default. Use the -n flag to run in batch.
     Useful for checking makefiles and markdown, where trailing spaces can cause issues.
 
 EOF

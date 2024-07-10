@@ -1,0 +1,1 @@
+../obsidian/load_launch_agents.sh
