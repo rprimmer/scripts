@@ -1,68 +1,66 @@
-#!/usr/bin/env bash
+#!/bin/bash
 
-# Function to get plist names from launchctl
-get_plist_names() {
-    launchctl list | grep -v apple | awk 'NR>1 {print $3".plist"}'
-    sudo launchctl list | grep -v apple | awk 'NR>1 {print $3".plist"}'
+# Report installed third-party launchd plists and their current service state.
+# User and system domains are readable without sudo on current macOS releases.
+
+set -u
+
+USER_DOMAIN="gui/$(id -u)"
+FOUND_PLIST=0
+
+print_header() {
+    printf "%-8s %-13s %-14s %-6s %s\n" "LOADED" "STATE" "LAST-EXIT" "DOMAIN" "LABEL / PLIST"
+    printf "%-8s %-13s %-14s %-6s %s\n" "------" "-----" "---------" "------" "-------------"
 }
 
-# Get the list of plist files from launchctl, skipping the header row and removing duplicates
-plist_names=$(get_plist_names | sort -u)
-
-# Define an array of common directories to search
-dirs=(
-    "/Library/LaunchAgents"
-    "/Library/LaunchDaemons"
-    "/System/Library/LaunchAgents"
-    "/System/Library/LaunchDaemons"
-    "$HOME/Library/LaunchAgents"
-)
-
-# Function to search for a single plist file
-search_plist() {
-    local plist_name="$1"
-    for dir in "${dirs[@]}"; do
-        if [ -e "$dir/$plist_name" ]; then
-            printf "Found: %s/%s\n" "$dir" "$plist_name"
-            return 0
-        fi
-    done
-    return 1
+service_value() {
+    local key="$1"
+    awk -F ' = ' -v key="$key" '$1 ~ "^[[:space:]]*" key "$" { print $2; exit }'
 }
 
-# Arrays to store found and not found plist files
-found_plists=()
-not_found_plists=()
+report_plist() {
+    local plist="$1"
+    local domain="$2"
+    local domain_name="$3"
+    local label details state last_exit
 
-# Main script execution
-if [ -z "$plist_names" ]; then
-    printf "No plist files found by launchctl.\n"
-    exit 1
-fi
-
-for plist_name in $plist_names; do
-    printf "Searching for: %s\n" "$plist_name"
-    plist_path=$(search_plist "$plist_name")
-    if [ $? -eq 0 ]; then
-        found_plists+=("$plist_path")
-    else
-        not_found_plists+=("$plist_name")
+    if ! label=$(plutil -extract Label raw "$plist" 2>/dev/null); then
+        printf "%-8s %-13s %-14s %-6s %s\n" "invalid" "-" "-" "$domain_name" "$plist"
+        return
     fi
-done
 
-# Print found and not found plist files
-if [ ${#found_plists[@]} -gt 0 ]; then
-    printf "\nFound plist files:\n"
-    for plist in "${found_plists[@]}"; do
-        printf "%s\n" "$plist"
-    done
-else
-    printf "\nNo plist files found in common directories.\n"
-fi
+    if details=$(launchctl print "$domain/$label" 2>/dev/null); then
+        state=$(printf '%s\n' "$details" | service_value state)
+        last_exit=$(printf '%s\n' "$details" | service_value "last exit code")
+        [[ -n "$state" ]] || state="unknown"
+        [[ -n "$last_exit" ]] || last_exit="never exited"
+        printf "%-8s %-13s %-14s %-6s %s / %s\n" "yes" "$state" "$last_exit" "$domain_name" "$label" "$plist"
+    else
+        printf "%-8s %-13s %-14s %-6s %s / %s\n" "no" "-" "-" "$domain_name" "$label" "$plist"
+    fi
+}
 
-if [ ${#not_found_plists[@]} -gt 0 ]; then
-    printf "\nPlist files not found in common directories:\n"
-    for plist in "${not_found_plists[@]}"; do
-        printf "%s\n" "$plist"
+scan_directory() {
+    local directory="$1"
+    local domain="$2"
+    local domain_name="$3"
+    local plist
+
+    [[ -d "$directory" ]] || return
+
+    for plist in "$directory"/*.plist; do
+        [[ -e "$plist" ]] || continue
+        FOUND_PLIST=1
+        report_plist "$plist" "$domain" "$domain_name"
     done
+}
+
+print_header
+scan_directory "$HOME/Library/LaunchAgents" "$USER_DOMAIN" "user"
+scan_directory "/Library/LaunchAgents" "$USER_DOMAIN" "user"
+scan_directory "/Library/LaunchDaemons" "system" "system"
+
+if (( ! FOUND_PLIST )); then
+    printf "No third-party launchd plist files found.\n" >&2
+    exit 1
 fi
