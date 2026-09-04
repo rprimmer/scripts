@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 
 # Display a process tree, optionally limited to branches matching a string.
 

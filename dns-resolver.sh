@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 
 # Resolve an IPv4 address iteratively from a root DNS server.
 
