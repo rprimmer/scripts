@@ -2,8 +2,10 @@ This file has been automatically generated using the following command:
 
 	git log --pretty=format:'%h %d %ai - %s'
 
-b256bcf  (HEAD -> main) Fri Sep 4 17:28:51 2026 -0400 - Modernize launchd plist status check
-90e9fe2  (origin/main) Wed Jul 10 15:53:07 2024 -0400 - added: load_launch_agents.sh and remove-microsoft-cruft.sh
+62a9505  (HEAD -> main) Fri Sep 4 17:31:24 2026 -0400 - Use Homebrew Bash for launchd status check
+c76b73d  (origin/main) Fri Sep 4 17:29:27 2026 -0400 - Update ChangeLog
+b256bcf  Fri Sep 4 17:28:51 2026 -0400 - Modernize launchd plist status check
+90e9fe2  Wed Jul 10 15:53:07 2024 -0400 - added: load_launch_agents.sh and remove-microsoft-cruft.sh
 40938b2  Tue Jun 11 17:07:37 2024 -0400 - created find_launchctl_plists
 f957dd6  Tue Jun 4 08:37:51 2024 -0400 - Updates
 e3a184b  Fri Apr 19 15:01:48 2024 -0400 - remove create-syms-2.sh
