@@ -2,8 +2,10 @@ This file has been automatically generated using the following command:
 
 	git log --pretty=format:'%h %d %ai - %s'
 
-6f41f17  (HEAD -> main) 2026-09-04 17:50:07 -0400 - Improve script safety and portability
-e67e4d9  (origin/main) 2026-09-04 17:31:41 -0400 - Update ChangeLog
+ca3c54c  (HEAD -> main) 2026-09-04 17:51:07 -0400 - Add workspace spelling configuration
+f4bae50  (origin/main) 2026-09-04 17:50:22 -0400 - Update ChangeLog
+6f41f17  2026-09-04 17:50:07 -0400 - Improve script safety and portability
+e67e4d9  2026-09-04 17:31:41 -0400 - Update ChangeLog
 62a9505  2026-09-04 17:31:24 -0400 - Use Homebrew Bash for launchd status check
 c76b73d  2026-09-04 17:29:27 -0400 - Update ChangeLog
 b256bcf  2026-09-04 17:28:51 -0400 - Modernize launchd plist status check
