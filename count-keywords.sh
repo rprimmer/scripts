@@ -2,7 +2,7 @@
 
 usage() {
     cat << EOF 
-usage: $(basename $0) [options] <arguments>
+usage: $(basename "$0") [options] <arguments>
     OPTIONS
         -t Only display total occurrences and show a dot as a progress indicator for each file with occurrences
 
@@ -29,36 +29,36 @@ while getopts ":t" opt; do
 done
 shift $((OPTIND -1))
 
+if [[ $# -ne 2 || ! -d $1 || -z $2 ]]; then
+    usage
+    exit 1
+fi
+
 directory="$1"
 keyword="$2"
-
-[[ -z "$directory" ]] || [[ -z "$keyword" ]] && usage && exit 1
 
 directory="${directory%/}"
 declare -i total_count=0
 
 search_files() {
-    for file in "$1"/*; do
-        if [[ -f "$file" ]]; then
-            declare -i file_count=$(grep -Io "$keyword" "$file" | wc -l | xargs)
-            if (($file_count > 0)) ; then
-                if $show_files ; then
-                    echo "$file: $file_count occurrences"
-                else
-                    printf "."
-                fi
-                total_count=$((total_count + file_count))
+    local file file_count
+    while IFS= read -r -d '' file; do
+        file_count=$(grep -IFo -- "$keyword" "$file" 2>/dev/null | wc -l | xargs)
+        if ((file_count > 0)); then
+            if $show_files; then
+                echo "$file: $file_count occurrences"
+            else
+                printf "."
             fi
-        elif [[ -d "$file" ]]; then
-            search_files "$file"
+            total_count=$((total_count + file_count))
         fi
-    done
+    done < <(find "$1" -type f -print0)
 }
 
 search_files "$directory"
 
 if $show_files ; then
-    printf "Total occurrences of '$keyword' in all files: %d\n" $total_count
+    printf "Total occurrences of '%s' in all files: %d\n" "$keyword" "$total_count"
 else
-    printf "\nTotal occurrences of '$keyword' in all files: %d\n" $total_count
+    printf "\nTotal occurrences of '%s' in all files: %d\n" "$keyword" "$total_count"
 fi

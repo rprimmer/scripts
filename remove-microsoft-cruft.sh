@@ -1,13 +1,35 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # It's nearly impossible to get rid of all the MS cruft that comes with installing their apps.
 # This is particularly true for Office and Edge. The only app they have that I like is VSC.
 
+set -u
+
+if [[ ${1:-} != "--execute" ]]; then
+    cat <<'EOF'
+DRY RUN ONLY: no files were removed.
+
+This script removes OneDrive, Office, Teams, Edge, their containers, support
+files, receipts, launch services, and licensing helpers. Review the script,
+then rerun it with --execute if that entire scope is intended.
+EOF
+    exit 0
+fi
+
+printf '%s\n' "WARNING: this permanently removes Microsoft applications and support data."
+read -r -p "Type REMOVE MICROSOFT to continue: " confirmation
+if [[ $confirmation != "REMOVE MICROSOFT" ]]; then
+    echo "Aborted; nothing was removed."
+    exit 1
+fi
+
+sudo -v
+
 # Terminate OneDrive process
-sudo pkill -9 OneDrive
+sudo pkill -TERM -x OneDrive 2>/dev/null || true
 
 # Remove OneDrive application
-sudo rm -rf /Applications/OneDrive.app/
+sudo rm -rf "/Applications/OneDrive.app"
 
 # Remove OneDrive launch agents and daemons
 sudo rm /Library/LaunchAgents/com.microsoft.OneDriveStandaloneUpdater.plist
@@ -23,11 +45,11 @@ sudo rm /private/var/db/receipts/com.microsoft.OneDrive.plist
 sudo rm /Library/LaunchDaemons/com.microsoft.OneDriveUpdaterDaemon.plist
 
 # Remove OneDrive containers
-sudo rm -rf ${HOME}/Library/Containers/com.microsoft.OneDrive-mac
-sudo rm -rf ${HOME}/Library/Containers/com.microsoft.OneDrive-mac.FinderSync
-sudo rm -rf ${HOME}/Library/Containers/com.microsoft.OneDrive.FinderSync
-sudo rm -rf ${HOME}/Library/Containers/com.microsoft.OneDriveLauncher
-sudo rm -rf ${HOME}/Library/WebKit/com.microsoft.OneDrive
+sudo rm -rf "${HOME}/Library/Containers/com.microsoft.OneDrive-mac"
+sudo rm -rf "${HOME}/Library/Containers/com.microsoft.OneDrive-mac.FinderSync"
+sudo rm -rf "${HOME}/Library/Containers/com.microsoft.OneDrive.FinderSync"
+sudo rm -rf "${HOME}/Library/Containers/com.microsoft.OneDriveLauncher"
+sudo rm -rf "${HOME}/Library/WebKit/com.microsoft.OneDrive"
 
 # Remove OneDrive application scripts
 sudo rm -rf "${HOME}/Library/Application Scripts/com.microsoft.OneDrive"
@@ -83,8 +105,5 @@ sudo rm -rf /Applications/Microsoft\ Outlook.app/
 sudo rm -rf /Applications/Microsoft\ OneNote.app/
 sudo rm -rf /Applications/Microsoft\ Teams.app/
 sudo rm -rf /Applications/Microsoft\ Edge.app/
-
-# Ensure no leftover Microsoft processes are running
-sudo pkill -9 "Microsoft"
 
 echo "Microsoft software and related files have been removed."

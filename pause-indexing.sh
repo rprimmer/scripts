@@ -4,7 +4,7 @@
 # I can never remember the name of the command to control the MDS on macOS. 
 
 usage() {
-    echo "Usage: $(basename "$0") <ACTION>"
+    echo "Usage: $(basename "$0") <ACTION> [VOLUME]"
     echo 
     echo "Actions:"
     echo "  pause         Pause indexing service"
@@ -13,6 +13,7 @@ usage() {
     echo
     echo "Example:"
     echo "  $(basename "$0") pause"
+    echo "  $(basename "$0") status /"
     echo
     exit 1
 }
@@ -21,12 +22,14 @@ if [[ $# -lt 1 ]]; then
     usage
 fi
 
-if [[ "$1" = "pause" ]]; then   
-    sudo mdutil -i off
+volume=${2:-/System/Volumes/Data}
+
+if [[ "$1" = "pause" ]]; then
+    sudo mdutil -i off "$volume"
 elif [[ "$1" = "resume" ]]; then
-    sudo mdutil -i on
+    sudo mdutil -i on "$volume"
 elif [[ "$1" = "status" ]]; then
-    sudo mdutil -s /System/Volumes/Data
+    mdutil -s "$volume"
 else 
     usage
 fi

@@ -1,11 +1,34 @@
-#! /bin/sh
-# Detect duplicate files in a dir tree
+#!/usr/bin/env bash
 
-# Set the min file size of duplicates you want to flag
-SZ="+40M"
+# Detect duplicate files in a directory tree. Files are grouped by size and
+# SHA-256 digest, then confirmed byte-for-byte before being reported.
 
-# Set the check algorithm you want to use. macOS by default has: cksum and md5
-# ALGO="md5" -- note that using MD5 requires some code changes
-ALGO="cksum"
+set -u
 
-find . -type f -size $SZ -exec $ALGO {} \; | tee /tmp/tempfilelist.tmp | cut -f 1,2 -d ' ' | sort | uniq -d | grep -hif - /tmp/tempfilelist.tmp | sort -nrk2 | awk -F\  '$1!=x&&x{print ""}{x=$1}1'
+ROOT=${1:-.}
+MIN_SIZE=${MIN_SIZE:-+40M}
+declare -A FIRST_FILE=()
+declare -A PRINTED_GROUP=()
+
+if [[ ! -d "$ROOT" ]]; then
+    echo "Directory not found: $ROOT" >&2
+    exit 1
+fi
+
+while IFS= read -r -d '' file; do
+    size=$(stat -f %z "$file") || continue
+    digest=$(shasum -a 256 "$file" | awk '{print $1}') || continue
+    key="$size:$digest"
+
+    if [[ -n ${FIRST_FILE[$key]+set} ]]; then
+        if cmp -s "${FIRST_FILE[$key]}" "$file"; then
+            if [[ -z ${PRINTED_GROUP[$key]+set} ]]; then
+                printf '%s bytes\n  %s\n' "$size" "${FIRST_FILE[$key]}"
+                PRINTED_GROUP[$key]=1
+            fi
+            printf '  %s\n' "$file"
+        fi
+    else
+        FIRST_FILE[$key]="$file"
+    fi
+done < <(find "$ROOT" -type f -size "$MIN_SIZE" -print0)

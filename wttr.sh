@@ -1,8 +1,10 @@
-#! /usr/bin/env bash
+#!/usr/bin/env bash
 # If you source this file, it will set WTTR_PARAMS as well as show weather.
 
 # WTTR_PARAMS is space-separated URL parameters, many of which are single characters that can be
 # lumped together. For example, "F q m" behaves the same as "Fqm".
+WTTR_PARAMS=${WTTR_PARAMS:-}
+
 if [[ -z "$WTTR_PARAMS" ]]; then
   # Form localized URL parameters for curl
   if [[ -t 1 ]] && [[ "$(tput cols)" -lt 125 ]]; then
@@ -21,11 +23,12 @@ fi
 wttr() {
   local location="${1// /+}"
   command shift
-  local args=""
+  local -a curl_args=(-fGsS --compressed -H "Accept-Language: ${LANG%_*}")
+  local p
   for p in $WTTR_PARAMS "$@"; do
-    args+=" --data-urlencode $p "
+    curl_args+=(--data-urlencode "$p")
   done
-  curl -fGsS -H "Accept-Language: ${LANG%_*}" $args --compressed "wttr.in/${location}"
+  curl "${curl_args[@]}" --max-time 20 "https://wttr.in/${location}"
 }
 
 wttr "$@"

@@ -5,7 +5,7 @@
 
 _print_error () {
     echo "Error occurred:"
-    awk 'NR>L-4 && NR<L+4 { printf "%-5d%3s%s\n",NR,(NR==L?">>>":""),$0 }' L=$1 $0
+    awk -v L="$1" 'NR>L-4 && NR<L+4 { printf "%-5d%3s%s\n",NR,(NR==L?">>>":""),$0 }' "$0"
 }
 
 trap '_print_error "$LINENO"' ERR

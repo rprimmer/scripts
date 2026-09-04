@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # encrypt/decrypt files or directories. Action depends on name of the linked script called
 # Usage: encrypt | decrypt <file | directory>
 # bcrypt(1) uses blowfish encryption
@@ -8,11 +8,11 @@
 # 2) create a soft link to the decrypt file:  ln decrypt encrypt
 # This step is needed as the script determines the appropriate action based on the filename of the script
 
-BCRYPT="/usr/local/bin/bcrypt"
+BCRYPT=${BCRYPT:-$(command -v bcrypt || true)}
 
 boolean_query() {
     printf "%s " "$1"
-    read response
+    read -r response
     case $response in
 	"y" | "Y" | [yY][eE][sS]) return 0;;
 	"n" | "N" | [nN][oO])     return 1;;
@@ -21,26 +21,39 @@ boolean_query() {
     return
 }
 
-# Veryify environment
-[[ ! -e $BCRYPT ]] && { echo "Abort: $BCRYPT not found";  exit 1; }
+# Verify environment
+[[ -z "$BCRYPT" || ! -x "$BCRYPT" ]] && { echo "Abort: bcrypt not found"; exit 1; }
 
-[[ $# -eq 0 ]] && { echo "Usage: $(basename "$0") file | directory";  exit 1; }
+[[ $# -ne 1 ]] && { echo "Usage: $(basename "$0") file | directory"; exit 1; }
 
 [[ ! -e $1 ]] && { echo "File: $1 does not exist";  exit 1; }
 
 TARGET=$1
+ACTION=$(basename "$0")
+
+case $ACTION in
+    decrypt.sh|encrypt.sh) ;;
+    *) echo "Invoke this script as decrypt.sh or encrypt.sh" >&2; exit 1 ;;
+esac
 
 # Decryption path
-if [ $(basename "$0") = "decrypt.sh" ]  ;  then
+if [[ $ACTION == "decrypt.sh" ]]; then
     echo Decrypting "$TARGET"
-    $BCRYPT "$TARGET"
-    [[ $? -ne 0 ]] && { echo "bcrypt failed!"; exit $?; }
+    if ! "$BCRYPT" "$TARGET"; then
+        echo "bcrypt failed!" >&2
+        exit 1
+    fi
     # check to see if this is a tarball
     if [[  $TARGET =~ .*.tar.* ]]  ;  then
-        if boolean_query "Expand Tarball (y/n)"  ;  then
+        if boolean_query "Expand Tarball (y/n)"; then
             # bcrypt adds a .bfe suffix to encrypted files, need to strip that out to untar
-	        tar zxvf "${TARGET%.bfe}"
-	        rm "${TARGET%.bfe}"
+		        decrypted_tar=${TARGET%.bfe}
+            if tar zxvf "$decrypted_tar"; then
+                rm "$decrypted_tar"
+            else
+                echo "Archive extraction failed; leaving $decrypted_tar intact." >&2
+                exit 1
+            fi
         else
 	        echo Leaving tarball intact. Exiting...
         fi
@@ -49,11 +62,12 @@ if [ $(basename "$0") = "decrypt.sh" ]  ;  then
 fi
 
 # Encryption path - directory
-if [ -d "$TARGET" ]  ;  then
+if [[ -d "$TARGET" ]]; then
     # Must remove trailing / if present on directory name
-    TARGET=$(echo "${TARGET}" | sed 's#/*$##')
+    TARGET=${TARGET%/}
+    [[ -n "$TARGET" ]] || { echo "Refusing to encrypt the filesystem root." >&2; exit 1; }
     echo "$TARGET" is a directory. Creating tarball...
-    if [ -f "$TARGET".tar -o -f "$TARGET".tar.gz ]  ;  then
+    if [[ -f "$TARGET.tar" || -f "$TARGET.tar.gz" ]]; then
         echo Tarball already exists
         ls -las "$TARGET".tar*
         if boolean_query "Delete Tarball (y/n)"  ;  then
@@ -63,12 +77,17 @@ if [ -d "$TARGET" ]  ;  then
             exit 1
         fi
     fi
-  tar zcf "$TARGET".tar.gz "$TARGET"
-  $BCRYPT "$TARGET".tar.gz
-  [[ $? -ne 0 ]] && { echo "bcrypt failed!";  exit $?; }
+  if ! tar zcf "$TARGET".tar.gz "$TARGET"; then
+      echo "Unable to create archive: $TARGET.tar.gz" >&2
+      exit 1
+  fi
+  if ! "$BCRYPT" "$TARGET".tar.gz; then
+      echo "bcrypt failed!" >&2
+      exit 1
+  fi
   ls -las "$TARGET".tar.gz.bfe
   if boolean_query "Delete directory $TARGET (y/n)"  ;  then
-        rm -r "$TARGET"
+        rm -r -- "$TARGET"
     else
         echo Leaving directory "$TARGET" intact.
     fi
@@ -76,8 +95,10 @@ if [ -d "$TARGET" ]  ;  then
 fi
 
 # Encryption path - file
-$BCRYPT "$TARGET"
-[[ $? -ne 0 ]] && { echo "bcrypt failed!";  exit $?; }
+if ! "$BCRYPT" "$TARGET"; then
+    echo "bcrypt failed!" >&2
+    exit 1
+fi
 # bcrypt adds .bfe suffix to encrypted files
 [[ ! -e $TARGET.bfe ]] && { echo "Error! File not found: $TARGET.bfe";  exit 1; }
 

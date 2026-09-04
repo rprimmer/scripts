@@ -1,5 +1,5 @@
-#! /bin/sh
+#!/bin/sh
 # Return external IP address
 
-curl -s http://ipecho.net/plain
-echo 
+curl --fail --silent --show-error --max-time 10 https://api.ipify.org
+printf '\n'

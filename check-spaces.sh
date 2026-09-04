@@ -9,7 +9,7 @@ trap cleanup SIGINT
 
 usage() {
     cat <<EOF
-usage: $(basename $0) [OPTIONS] <arguments>
+usage: $(basename "$0") [OPTIONS] <arguments>
     OPTIONS
         -n  Run in non-interactive mode, automatically removing trailing spaces without prompting
 
@@ -24,7 +24,7 @@ INFO
 EOF
 }
 
-[[ $# = 0 ]] && usage && exit 1
+[[ $# -eq 0 ]] && usage && exit 1
 
 declare -i interactive=1 # Default to interactive mode
 
@@ -36,6 +36,8 @@ while getopts ":n" opt; do
 done
 shift $((OPTIND - 1))
 
+[[ $# -eq 0 ]] && usage && exit 1
+
 declare -a stat_cmd
 if [[ $(uname) == "Darwin" ]]; then
     stat_cmd=(stat -f %z) # macOS
@@ -45,7 +47,6 @@ fi
 
 check_trailing_spaces() {
     grep -q '[[:space:]]$' "$1"
-    return $?
 }
 
 display_lines() {
@@ -89,7 +90,7 @@ for file in "$@"; do
             echo "  [r] Remove trailing spaces"
             echo "  [s] Skip file"
             echo "  [x] Exit"
-            read -p "Choose an option [d/r/s/x]: " -n 1 -r option
+            read -r -p "Choose an option [d/r/s/x]: " -n 1 option
             echo
 
             case $option in

@@ -1,6 +1,7 @@
-#! /usr/bin/env bash 
+#!/usr/bin/env bash
  
-# Choose your favorite table
+# This uses the selected half-rotation table. The active "advanced" table is a
+# custom substitution cipher; select the classic 26-letter table for ROT13.
  
 # classic
 # SIGNS=( a b c d e f g h i j k l m n o p q r s t u v w x y z )
@@ -14,51 +15,55 @@ SIGNS=( a b c d f e h g j i l k m n o p q r s t u v w x y z . - ? ! "#" "+" )
 # 0 1 2 3 4 5 6 7 8 9 0 )  
  
 query() { 
-    nc=0
-    while [ $nc -lt ${#SIGNS[@]} ]; do 
+    local nc=0 ORIGNUM=""
+    while (( nc < ${#SIGNS[@]} )); do
         if [ "$1" = "${SIGNS[$nc]}" ]; then
-            local ORIGNUM=$nc
+            ORIGNUM=$nc
         fi
         ((nc++))
     done
  
-    if [  -z "$ORIGNUM" ]; then
+    if [[ -z "$ORIGNUM" ]]; then
         printf "%s " "$1"
         return
     fi
-    ENCRYPTNUM=$(($ORIGNUM + ${#SIGNS[@]} / 2))
-    if [ $ENCRYPTNUM -ge ${#SIGNS[@]} ]; then
-        ENCRYPTNUM=$(($ENCRYPTNUM - ${#SIGNS[@]} ))
+    local ENCRYPTNUM=$((ORIGNUM + ${#SIGNS[@]} / 2))
+    if (( ENCRYPTNUM >= ${#SIGNS[@]} )); then
+        ENCRYPTNUM=$((ENCRYPTNUM - ${#SIGNS[@]}))
     fi
     
-    printf "%s" ${SIGNS[$ENCRYPTNUM]} 
+    printf "%s" "${SIGNS[$ENCRYPTNUM]}"
 }
 
 table() {
-    for x in ${SIGNS[@]}; do
+    local x
+    for x in "${SIGNS[@]}"; do
         printf "%s: " "$x"
-        query $x
+        query "$x"
         echo
     done
 }
 
 main() {    
+    local input
     if [ $# -eq 0 ]; then
-        set -- "$(cat /dev/stdin)"
+        input=$(cat /dev/stdin)
+    else
+        input="$*"
     fi
     local sc=0
-    while [ $sc -lt ${#1} ]; do
-        if [ "${1:$sc:1}" = " " ]; then 
+    while (( sc < ${#input} )); do
+        if [[ "${input:$sc:1}" == " " ]]; then
             printf " "
         else
-            query "${1:$sc:1}"
+            query "${input:$sc:1}"
         fi 
         ((sc++))
     done
     echo 
 }
 
-case $1 in 
+case ${1:-} in
     -t) table ;;
     *) main "$@" ;;  
 esac

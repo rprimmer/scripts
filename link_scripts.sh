@@ -32,7 +32,7 @@ EOF
 }
 
 log() {
-    echo "$(date +'%Y-%m-%d %H:%M:%S') $@" >> "$LOG_FILE" 
+    echo "$(date +'%Y-%m-%d %H:%M:%S') $*" >> "$LOG_FILE"
 }
 
 echo_and_log() {
@@ -44,15 +44,23 @@ create_soft_link() {
     local src_file="$1"
     local dest_file="$2"
     
-    if (( overwrite )) && [ -e "$dest_file" ]; then
-        echo_and_log "Overwriting existing soft link: $dest_file"
-        if ! rm "$dest_file"; then
+    if [[ -e "$dest_file" || -L "$dest_file" ]]; then
+        if (( ! overwrite )); then
+            echo_and_log "Skipping existing destination: $dest_file"
+            return 0
+        fi
+        if [[ -d "$dest_file" && ! -L "$dest_file" ]]; then
+            echo_and_log "Refusing to replace directory: $dest_file" >&2
+            return 1
+        fi
+        echo_and_log "Overwriting existing link or file: $dest_file"
+        if ! /bin/unlink "$dest_file"; then
             echo_and_log "Failed to remove existing soft link: $dest_file" >&2
             return 1
         fi
     fi
 
-    if ! ln -sf "$src_file" "$dest_file"; then
+    if ! ln -s "$src_file" "$dest_file"; then
         echo_and_log "Failed to create soft link: $dest_file" >&2
         return 1
     fi
@@ -65,10 +73,11 @@ scan_dir() {
     for file in "$SCRIPTS_DIR"/*; do
         [[ -f "$file" ]] || continue 
 
-        local filename=$(basename "$file")
+        local filename
+        filename=$(basename "$file")
         local extension="${filename##*.}"
 
-        if [[ " ${EXTENSIONS[*]} " =~ " $extension " ]]; then
+        if [[ " ${EXTENSIONS[*]} " == *" $extension "* ]]; then
             chmod +x "$file"
             create_soft_link "$file" "$LOCAL_BIN/$filename" 
         fi
