@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Report installed third-party launchd plists and their current service state.
 # User and system domains are readable without sudo on current macOS releases.
