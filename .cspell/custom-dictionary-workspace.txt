@@ -1,5 +1,0 @@
-# Custom Dictionary Words
-noall
-norecurse
-plists
-plutil
