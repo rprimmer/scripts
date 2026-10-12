@@ -1,0 +1,166 @@
+#!/usr/bin/env python3
+"""cc-transcript: write a Claude Code session as Markdown, with code blocks intact.
+
+/export saves the screen as the terminal drew it (wrapped, indented, Markdown
+already rendered away). This reads the session's own record instead
+(~/.claude/projects/<project>/<session>.jsonl), where every message keeps its
+original Markdown, so code blocks render with highlighting in any viewer.
+
+usage:
+  cc-transcript                  latest session of the current folder's project
+  cc-transcript SESSION.jsonl    a given session file
+options:
+  -o FILE      write here (default: ./_transcripts/DATE-PROJECT-ID.md, creating
+               ./_transcripts if needed); -o - writes to standard output
+  --tools      include each tool call's input and output (default: one line each)
+  --no-thinking  leave out Claude's visible thinking (included by default, folded)
+"""
+
+import argparse
+import datetime as dt
+import json
+import os
+import re
+import sys
+from pathlib import Path
+
+PROJECTS = Path.home() / ".claude" / "projects"
+LANG_BY_EXT = {
+    ".go": "go", ".ts": "ts", ".js": "js", ".mjs": "js", ".svelte": "svelte",
+    ".py": "python", ".sh": "sh", ".md": "markdown", ".tex": "latex",
+    ".json": "json", ".yml": "yaml", ".yaml": "yaml", ".html": "html",
+    ".css": "css", ".c": "c", ".h": "c", ".1": "roff", ".rs": "rust",
+}
+
+
+def fence(text, lang=""):
+    """A fenced block that cannot be closed early by backticks inside text."""
+    longest = max((len(m) for m in re.findall(r"`{3,}", text)), default=2)
+    f = "`" * (longest + 1)
+    return f"{f}{lang}\n{text.rstrip()}\n{f}"
+
+
+def latest_session(cwd):
+    project = PROJECTS / re.sub(r"[^A-Za-z0-9]", "-", str(cwd))
+    files = sorted(project.glob("*.jsonl"), key=lambda p: p.stat().st_mtime)
+    if not files:
+        sys.exit(f"cc-transcript: no sessions found in {project}")
+    return files[-1]
+
+
+def clean_user_text(s):
+    """Drops what the harness injects into a user turn; keeps what the user typed."""
+    s = re.sub(r"<system-reminder[^>]*>.*?</system-reminder[^>]*>", "", s, flags=re.S)
+    m = re.search(r"<command-name>(.*?)</command-name>.*?<command-args>(.*?)</command-args>", s, flags=re.S)
+    if m:
+        return f"*ran* `{m.group(1).strip()} {m.group(2).strip()}`"
+    s = re.sub(r"<local-command-[a-z]+>.*?</local-command-[a-z]+>", "", s, flags=re.S)
+    return s.strip()
+
+
+def tool_summary(b):
+    i = b.get("input", {})
+    name = b.get("name", "tool")
+    detail = i.get("description") or i.get("file_path") or i.get("command") or i.get("pattern") or ""
+    return f"`{name}` {str(detail).splitlines()[0][:160] if detail else ''}".rstrip()
+
+
+def tool_detail(b):
+    i = b.get("input", {})
+    name = b.get("name")
+    if name == "Bash":
+        return fence(i.get("command", ""), "sh")
+    if name == "Write":
+        p = i.get("file_path", "")
+        return f"`{p}`\n\n" + fence(i.get("content", ""), LANG_BY_EXT.get(Path(p).suffix, ""))
+    if name == "Edit":
+        p = i.get("file_path", "")
+        lang = LANG_BY_EXT.get(Path(p).suffix, "")
+        return f"`{p}`\n\nold:\n\n{fence(i.get('old_string', ''), lang)}\n\nnew:\n\n{fence(i.get('new_string', ''), lang)}"
+    return fence(json.dumps(i, indent=2, ensure_ascii=False), "json")
+
+
+def result_text(b):
+    c = b.get("content")
+    if isinstance(c, list):
+        c = "\n".join(x.get("text", "") for x in c if isinstance(x, dict))
+    return str(c or "")
+
+
+def render(path, tools, thinking):
+    out, speaker, first_ts = [], None, None
+
+    def say(who, text):
+        nonlocal speaker
+        if who != speaker:
+            out.append(f"\n## {who}\n")
+            speaker = who
+        out.append(text.strip() + "\n")
+
+    for line in open(path, encoding="utf-8"):
+        try:
+            d = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if d.get("isSidechain") or d.get("type") not in ("user", "assistant"):
+            continue
+        first_ts = first_ts or d.get("timestamp")
+        content = d.get("message", {}).get("content")
+        if d["type"] == "user":
+            if isinstance(content, str):
+                text = clean_user_text(content)
+                if not text:
+                    continue
+                if d.get("isMeta"):
+                    say("Agent report", "\n".join("> " + l for l in text.splitlines()))
+                else:
+                    say("You", text)
+            elif tools and isinstance(content, list):
+                for b in content:
+                    if b.get("type") == "tool_result":
+                        r = result_text(b).strip()
+                        if r:
+                            say("Claude", "<details><summary>output</summary>\n\n" + fence(r[:20000]) + "\n\n</details>")
+            continue
+        for b in content or []:
+            t = b.get("type")
+            if t == "text" and b.get("text", "").strip():
+                say("Claude", b["text"])
+            elif t == "thinking" and thinking and b.get("thinking", "").strip():
+                say("Claude", "<details><summary>thinking</summary>\n\n" + b["thinking"].strip() + "\n\n</details>")
+            elif t == "tool_use":
+                if tools:
+                    say("Claude", f"**{tool_summary(b)}**\n\n{tool_detail(b)}")
+                else:
+                    say("Claude", f"- {tool_summary(b)}")
+    return first_ts, "\n".join(out)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("session", nargs="?")
+    ap.add_argument("-o", "--output")
+    ap.add_argument("--tools", action="store_true")
+    ap.add_argument("--no-thinking", action="store_true")
+    a = ap.parse_args()
+
+    cwd = Path.cwd()
+    path = Path(a.session) if a.session else latest_session(cwd)
+    first_ts, body = render(path, a.tools, not a.no_thinking)
+    day = (first_ts or dt.date.today().isoformat())[:10]
+    title = f"# Claude Code session, {cwd.name}, {day}\n\nSession `{path.stem}`, converted {dt.datetime.now():%Y-%m-%d %H:%M}.\n"
+    doc = title + body
+
+    if a.output == "-":
+        sys.stdout.write(doc)
+        return
+    target = Path(a.output or cwd / "_transcripts" / f"{day}-{cwd.name}-{path.stem[:8]}.md")
+    if not target.parent.is_dir():
+        target.parent.mkdir(parents=True)
+        print(f"cc-transcript: created {target.parent}", file=sys.stderr)
+    target.write_text(doc, encoding="utf-8")
+    print(f"cc-transcript: wrote {target}", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()
