@@ -1,0 +1,138 @@
+#!/usr/bin/env python3
+
+# Auto-number paragraphs for markdown notes
+
+import argparse
+import re
+from pathlib import Path
+
+
+HEADING_RE = re.compile(r'^(#{1,6})\s+(.*)$')
+FENCE_RE = re.compile(r'^\s*(```|~~~)')
+
+NUMBER_PREFIX_RE = re.compile(
+    r'^\d+(?:\.\d+)*\.?\s+'
+)
+
+
+def strip_existing_number(title: str) -> str:
+    """Remove an existing hierarchical number from a heading."""
+    return NUMBER_PREFIX_RE.sub('', title, count=1)
+
+
+def number_markdown(text: str, start: int = 1) -> str:
+    """
+    Number Markdown headings using this scheme:
+
+    #      Document title, unnumbered
+    ##     1.0
+    ###    1.1
+    ####   1.1.1
+    #####  1.1.1.1
+    ###### 1.1.1.1.1
+    """
+
+    counters = [0] * 5
+    counters[0] = start - 1
+
+    output = []
+    in_fence = False
+    fence_marker = None
+
+    for line in text.splitlines():
+        fence_match = FENCE_RE.match(line)
+
+        if fence_match:
+            marker = fence_match.group(1)
+
+            if not in_fence:
+                in_fence = True
+                fence_marker = marker
+            elif marker == fence_marker:
+                in_fence = False
+                fence_marker = None
+
+            output.append(line)
+            continue
+
+        if in_fence:
+            output.append(line)
+            continue
+
+        match = HEADING_RE.match(line)
+
+        if not match:
+            output.append(line)
+            continue
+
+        hashes, title = match.groups()
+        level = len(hashes)
+
+        title = strip_existing_number(title)
+
+        # H1 is the document title.
+        if level == 1:
+            output.append(f"# {title}")
+            continue
+
+        depth = level - 2
+
+        counters[depth] += 1
+
+        for i in range(depth + 1, len(counters)):
+            counters[i] = 0
+
+        if depth == 0:
+            number = f"{counters[0]}.0"
+        else:
+            number = ".".join(
+                str(counters[i])
+                for i in range(depth + 1)
+            )
+
+        output.append(f"{hashes} {number} {title}")
+
+    return "\n".join(output) + "\n"
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description=(
+            "Add hierarchical numbering to Markdown headings. "
+            "H1 is treated as an unnumbered document title."
+        )
+    )
+
+    parser.add_argument(
+        "input",
+        type=Path,
+        help="Markdown file to number"
+    )
+
+    parser.add_argument(
+        "output",
+        nargs="?",
+        type=Path,
+        help="Optional output file. If omitted, input is rewritten in place."
+    )
+
+    parser.add_argument(
+        "--start",
+        type=int,
+        default=1,
+        help="Starting top-level section number (default: 1)"
+    )
+
+    args = parser.parse_args()
+
+    input_path = args.input
+    output_path = args.output or input_path
+
+    text = input_path.read_text(encoding="utf-8")
+    numbered = number_markdown(text, args.start)
+
+    output_path.write_text(numbered, encoding="utf-8")
+
+
+if __name__ == "__main__":
+    main()
