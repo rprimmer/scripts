@@ -1,23 +1,35 @@
 #!/usr/bin/env python3
-"""cc-transcript: write a Claude Code session as Markdown, with code blocks intact.
+"""cc-transcript: write a Claude Code session as a detailed Markdown record.
 
-/export saves the screen as the terminal drew it (wrapped, indented, Markdown
-already rendered away). This reads the session's own record instead
-(~/.claude/projects/<project>/<session>.jsonl), where every message keeps its
-original Markdown, so code blocks render with highlighting in any viewer.
+Reads the session's own record (~/.claude/projects/<project>/<session>.jsonl)
+and writes everything that happened, in order, with local timestamps: your
+messages, Claude's replies and visible thinking, every tool call with its full
+input and output (edits as unified diffs, Bash with stdout and stderr, large
+outputs read back from where Claude Code saved them), errors and denials,
+harness events (reminders, turn durations, recaps, compactions, mode and
+environment changes, files changed outside the session), each subagent's own
+transcript, and the session's cost and token totals.
+
+Left out: the system prompt, CLAUDE.md and other instruction contents, tool,
+skill and MCP listings, and account details (email, organization). Nothing in
+~/.claude is modified.
 
 usage:
   cc-transcript                  latest session of the current folder's project
   cc-transcript SESSION.jsonl    a given session file
 options:
-  -o FILE      write here (default: ./_transcripts/DATE-PROJECT-ID.md, creating
-               ./_transcripts if needed); -o - writes to standard output
-  --tools      include each tool call's input and output (default: one line each)
-  --no-thinking  leave out Claude's visible thinking (included by default, folded)
+  -o FILE          write here (default: ./_transcripts/DATE-PROJECT-ID.md);
+                   -o - writes to standard output
+  --brief          one line per tool call, no outputs, no subagents
+  --no-thinking    leave out Claude's visible thinking
+  --no-subagents   leave out subagent transcripts
+  --max-output N   cut each tool output to N characters (default: no limit)
 """
 
 import argparse
+import collections
 import datetime as dt
+import html
 import json
 import os
 import re
@@ -32,6 +44,20 @@ LANG_BY_EXT = {
     ".css": "css", ".c": "c", ".h": "c", ".1": "roff", ".rs": "rust",
 }
 
+# Attachments that only feed the model (listings, prompts, account details).
+QUIET_ATTACHMENTS = {
+    "total_tokens_reminder", "deferred_tools_delta", "deferred_tools_record",
+    "skill_listing", "prompt_snapshot", "agent_listing_delta", "session_context",
+    "credential_org", "remote_session_change", "mcp_instructions_delta",
+    "hook_success", "thinking_drop", "task_reminder",
+}
+# Bookkeeping records with nothing to show.
+QUIET_RECORDS = {
+    "mode", "atis-latch", "last-prompt", "ai-title", "custom-title", "agent-name",
+    "file-history-snapshot", "file-history-delta", "queue-operation", "summary",
+    "cost-state",
+}
+
 
 def fence(text, lang=""):
     """A fenced block that cannot be closed early by backticks inside text."""
@@ -40,127 +66,563 @@ def fence(text, lang=""):
     return f"{f}{lang}\n{text.rstrip()}\n{f}"
 
 
+def esc(text):
+    """Keep <, > and & literal in Markdown text (quotes need no escaping)."""
+    return html.escape(visible(text), quote=False)
+
+
+STRUCTURAL = re.compile(r"<(?=/?(?:details|summary|script|style|iframe)\b)", re.I)
+
+
+def prose(text):
+    """Markdown from you or Claude, kept as written, except that tags which
+    would close this file's folds or run in a viewer are escaped outside code
+    blocks."""
+    out, fence_len = [], 0
+    for line in visible(text).split("\n"):
+        m = re.match(r"\s{0,3}(`{3,}|~{3,})", line)
+        if m and not fence_len:
+            fence_len = len(m.group(1))
+        elif m and fence_len and len(m.group(1)) >= fence_len and not line.strip().strip("`~"):
+            fence_len = 0
+        elif not fence_len:
+            line = STRUCTURAL.sub("&lt;", line)
+        out.append(line)
+    return "\n".join(out)
+
+
+def fold(summary, body):
+    return f"<details><summary>{esc(summary)}</summary>\n\n{body}\n\n</details>"
+
+
+def visible(text):
+    """NUL survives JSON but not Markdown viewers; show it as a symbol."""
+    return text.replace("\0", "␀")
+
+
+def parse_ts(ts):
+    try:
+        return dt.datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except (AttributeError, ValueError):
+        return None
+
+
+def local_time(ts, with_date=True):
+    t = parse_ts(ts)
+    if t is None:
+        return ts or ""
+    return t.astimezone().strftime("%Y-%m-%d %H:%M:%S" if with_date else "%H:%M:%S")
+
+
+def seconds_between(a, b):
+    ta, tb = parse_ts(a), parse_ts(b)
+    return (tb - ta).total_seconds() if ta and tb else None
+
+
+def duration(sec):
+    if sec is None:
+        return ""
+    if sec < 1:
+        return f"{sec * 1000:.0f} ms"
+    if sec < 60:
+        return f"{sec:.1f} s"
+    m, s = divmod(int(round(sec)), 60)
+    if m < 60:
+        return f"{m} m {s} s"
+    h, m = divmod(m, 60)
+    return f"{h} h {m} m"
+
+
 def latest_session(cwd):
     project = PROJECTS / re.sub(r"[^A-Za-z0-9]", "-", str(cwd))
     files = sorted(project.glob("*.jsonl"), key=lambda p: p.stat().st_mtime)
     if not files:
-        sys.exit(f"cc-transcript: no sessions found in {project}")
+        raise ValueError(f"no sessions found in {project}")
     return files[-1]
 
 
-def clean_user_text(s):
-    """Drops what the harness injects into a user turn; keeps what the user typed."""
-    s = re.sub(r"<system-reminder[^>]*>.*?</system-reminder[^>]*>", "", s, flags=re.S)
+def read_records(path):
+    """A snapshot of the file, tolerating an unfinished final record."""
+    with path.open("rb") as stream:
+        lines = stream.read(os.fstat(stream.fileno()).st_size).splitlines(keepends=True)
+    records, seen = [], set()
+    for number, line in enumerate(lines, 1):
+        if not line.strip():
+            continue
+        try:
+            d = json.loads(line.decode("utf-8", errors="replace"))
+        except ValueError:
+            if number == len(lines) and not line.endswith(b"\n"):
+                print("cc-transcript: skipped an unfinished final record", file=sys.stderr)
+                break
+            print(f"cc-transcript: skipped invalid JSON at {path}:{number}", file=sys.stderr)
+            continue
+        if not isinstance(d, dict):
+            continue
+        uid = d.get("uuid")
+        if uid:  # compaction can write preserved messages again
+            if uid in seen:
+                continue
+            seen.add(uid)
+        records.append(d)
+    return records
+
+
+REMINDER = r"<system-reminder[^>]*>(.*?)</system-reminder[^>]*>"
+
+
+def reminder_notes(s):
+    """First line of each system reminder: enough to see what the harness said."""
+    notes = []
+    for body in re.findall(REMINDER, s, flags=re.S):
+        first = next((l.strip() for l in body.splitlines() if l.strip()), "")
+        if first:
+            notes.append(first[:200] + ("…" if len(first) > 200 else ""))
+    return notes
+
+
+def slash_command(s):
     m = re.search(r"<command-name>(.*?)</command-name>.*?<command-args>(.*?)</command-args>", s, flags=re.S)
-    if m:
-        return f"*ran* `{m.group(1).strip()} {m.group(2).strip()}`"
-    s = re.sub(r"<local-command-[a-z]+>.*?</local-command-[a-z]+>", "", s, flags=re.S)
-    return s.strip()
+    return (m.group(1).strip() + " " + m.group(2).strip()).strip() if m else None
 
 
-def tool_summary(b):
-    i = b.get("input", {})
-    name = b.get("name", "tool")
-    detail = i.get("description") or i.get("file_path") or i.get("command") or i.get("pattern") or ""
-    return f"`{name}` {str(detail).splitlines()[0][:160] if detail else ''}".rstrip()
+def tool_summary(name, i):
+    detail = (i.get("description") or i.get("file_path") or i.get("command")
+              or i.get("pattern") or i.get("query") or i.get("url") or i.get("skill")
+              or i.get("prompt") or "")
+    detail = str(detail).splitlines()[0][:160] if detail else ""
+    return f"{name}: {detail}" if detail else name
 
 
-def tool_detail(b):
-    i = b.get("input", {})
-    name = b.get("name")
+def tool_input(name, i):
     if name == "Bash":
-        return fence(i.get("command", ""), "sh")
+        out = fence(visible(i.get("command", "")), "sh")
+        extra = {k: v for k, v in i.items() if k not in ("command", "description")}
+        return out + ("\n\n" + fence(json.dumps(extra, indent=2), "json") if extra else "")
     if name == "Write":
         p = i.get("file_path", "")
-        return f"`{p}`\n\n" + fence(i.get("content", ""), LANG_BY_EXT.get(Path(p).suffix, ""))
+        return f"`{p}`\n\n" + fence(visible(i.get("content", "")), LANG_BY_EXT.get(Path(p).suffix, ""))
     if name == "Edit":
         p = i.get("file_path", "")
         lang = LANG_BY_EXT.get(Path(p).suffix, "")
-        return f"`{p}`\n\nold:\n\n{fence(i.get('old_string', ''), lang)}\n\nnew:\n\n{fence(i.get('new_string', ''), lang)}"
-    return fence(json.dumps(i, indent=2, ensure_ascii=False), "json")
+        every = " (all occurrences)" if i.get("replace_all") else ""
+        return (f"`{p}`{every}\n\nold:\n\n{fence(visible(i.get('old_string', '')), lang)}"
+                f"\n\nnew:\n\n{fence(visible(i.get('new_string', '')), lang)}")
+    return fence(visible(json.dumps(i, indent=2, ensure_ascii=False)), "json")
 
 
-def result_text(b):
-    c = b.get("content")
+def patch_text(hunks):
+    out = []
+    for h in hunks or []:
+        out.append(f"@@ -{h.get('oldStart')},{h.get('oldLines')} +{h.get('newStart')},{h.get('newLines')} @@")
+        out.extend(h.get("lines", []))
+    return "\n".join(out)
+
+
+def result_text(block):
+    c = block.get("content")
     if isinstance(c, list):
-        c = "\n".join(x.get("text", "") for x in c if isinstance(x, dict))
+        parts = []
+        for x in c:
+            if not isinstance(x, dict):
+                continue
+            if x.get("type") == "text":
+                parts.append(x.get("text", ""))
+            else:
+                parts.append(f"[{x.get('type', 'attachment')} not embedded]")
+        c = "\n".join(parts)
     return str(c or "")
 
 
-def render(path, tools, thinking):
-    out, speaker, first_ts = [], None, None
-
-    def say(who, text):
-        nonlocal speaker
-        if who != speaker:
-            out.append(f"\n## {who}\n")
-            speaker = who
-        out.append(text.strip() + "\n")
-
-    for line in open(path, encoding="utf-8"):
+def persisted(text):
+    """Claude Code saves large outputs to a file and shows the model a preview."""
+    m = re.search(r"<persisted-output>.*?Full output saved to: (\S+)", text, flags=re.S)
+    if m:
         try:
-            d = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if d.get("isSidechain") or d.get("type") not in ("user", "assistant"):
-            continue
-        first_ts = first_ts or d.get("timestamp")
-        content = d.get("message", {}).get("content")
-        if d["type"] == "user":
-            if isinstance(content, str):
-                text = clean_user_text(content)
-                if not text:
-                    continue
-                if d.get("isMeta"):
-                    say("Agent report", "\n".join("> " + l for l in text.splitlines()))
-                else:
-                    say("You", text)
-            elif tools and isinstance(content, list):
-                for b in content:
-                    if b.get("type") == "tool_result":
-                        r = result_text(b).strip()
-                        if r:
-                            say("Claude", "<details><summary>output</summary>\n\n" + fence(r[:20000]) + "\n\n</details>")
-            continue
+            return Path(m.group(1)).read_text(encoding="utf-8", errors="replace"), m.group(1)
+        except OSError:
+            pass
+    return None, None
+
+
+def clip(text, limit):
+    if limit and len(text) > limit:
+        return text[:limit] + f"\n… [{len(text) - limit:,} more characters cut by --max-output]"
+    return text
+
+
+class Renderer:
+    def __init__(self, opts, level=2, you="You", claude="Claude", subagents=None):
+        self.o, self.h, self.you, self.claude = opts, "#" * level, you, claude
+        self.subagents = subagents or {}
+        self.out, self.calls = [], {}
+        self.speaker = None
+        self.stats = collections.Counter()
+        self.tools = collections.Counter()
+        self.env = None
+        self.mode = None
+        self.plan = False
+        self.once = set()
+
+    def add(self, who, ts, text):
+        if who != self.speaker:
+            self.out.append(f"\n{self.h} {who} — {local_time(ts)}\n")
+            self.speaker = who
+        self.out.append(text.rstrip() + "\n\n")
+
+    def event(self, ts, text):
+        self.out.append(f"\n*{local_time(ts, with_date=False)} · {STRUCTURAL.sub("&lt;", visible(text))}*\n")
+        self.speaker = None
+
+    def record(self, d):
+        t, ts = d.get("type"), d.get("timestamp")
+        if t == "user":
+            self.user(d, ts)
+        elif t == "assistant":
+            self.assistant(d, ts)
+        elif t == "system":
+            self.system(d, ts)
+        elif t == "attachment":
+            self.attachment(d.get("attachment") or {}, ts)
+        elif t == "permission-mode":
+            mode = d.get("permissionMode")
+            if mode and mode != self.mode:
+                if self.mode is not None:
+                    self.event(ts, f"Permission mode: {self.mode} → {mode}")
+                self.mode = mode
+        elif t == "pr-link":
+            url = d.get("prUrl", "")
+            if url not in self.once:
+                self.once.add(url)
+                self.event(ts, f"Pull request: {url}")
+        elif t == "continued-in":
+            self.event(ts, f"Continued in session `{d.get('continuedInSessionId', '')}`")
+        elif t and t not in QUIET_RECORDS:
+            self.event(ts, f"Record of type `{esc(t)}`")
+
+    # --- user side ---------------------------------------------------------
+
+    def user(self, d, ts):
+        content = (d.get("message") or {}).get("content")
+        if d.get("isCompactSummary"):
+            text = content if isinstance(content, str) else result_text({"content": content})
+            self.add("Compaction summary", ts, fold("Summary Claude continued from", prose(text)))
+            return
+        if isinstance(content, str):
+            self.user_text(d, ts, content)
+            return
         for b in content or []:
+            if b.get("type") == "tool_result":
+                self.tool_result(d, b, ts)
+            elif b.get("type") == "text":
+                self.user_text(d, ts, b.get("text", ""))
+            elif b.get("type") == "image":
+                self.add(self.you, ts, "[image attached, not embedded]")
+
+    def user_text(self, d, ts, s):
+        for note in reminder_notes(s):
+            self.event(ts, f"Harness note: {esc(note)}")
+        s = re.sub(REMINDER, "", s, flags=re.S)
+        command = slash_command(s)
+        if command:
+            self.event(ts, f"You ran `{command}`")
+            return
+        m = re.search(r"<local-command-stdout>(.*?)</local-command-stdout>", s, flags=re.S)
+        if m:
+            if m.group(1).strip():
+                self.add(self.you, ts, fold("command output", fence(visible(m.group(1)), "text")))
+            return
+        m = re.search(r"<bash-input>(.*?)</bash-input>", s, flags=re.S)
+        if m:
+            self.event(ts, f"You ran shell command `! {m.group(1).strip()}`")
+            return
+        if "<bash-stdout>" in s or "<bash-stderr>" in s:
+            out = "".join(re.findall(r"<bash-stdout>(.*?)</bash-stdout>", s, flags=re.S))
+            err = "".join(re.findall(r"<bash-stderr>(.*?)</bash-stderr>", s, flags=re.S))
+            body = fence(visible(out), "text") if out.strip() else ""
+            if err.strip():
+                body += ("\n\nstderr:\n\n" if body else "stderr:\n\n") + fence(visible(err), "text")
+            if body:
+                self.add(self.you, ts, fold("shell command output", body))
+            return
+        s = re.sub(r"<local-command-[a-z]+>.*?</local-command-[a-z]+>", "", s, flags=re.S).strip()
+        if not s:
+            return
+        if d.get("isMeta") or "<task-notification>" in s:
+            self.add("Agent report", ts, "\n".join("> " + l for l in prose(s).splitlines()))
+            return
+        self.stats["prompts"] += 1
+        self.add(self.you, ts, prose(s))
+
+    # --- Claude's side -----------------------------------------------------
+
+    def assistant(self, d, ts):
+        for b in (d.get("message") or {}).get("content") or []:
             t = b.get("type")
             if t == "text" and b.get("text", "").strip():
-                say("Claude", b["text"])
-            elif t == "thinking" and thinking and b.get("thinking", "").strip():
-                say("Claude", "<details><summary>thinking</summary>\n\n" + b["thinking"].strip() + "\n\n</details>")
-            elif t == "tool_use":
-                if tools:
-                    say("Claude", f"**{tool_summary(b)}**\n\n{tool_detail(b)}")
-                else:
-                    say("Claude", f"- {tool_summary(b)}")
-    return first_ts, "\n".join(out)
+                self.stats["replies"] += 1
+                self.add(self.claude, ts, prose(b["text"]))
+            elif t == "thinking" and b.get("thinking", "").strip() and not self.o.no_thinking:
+                self.add(self.claude, ts, fold(f"Thinking — {local_time(ts, False)}", prose(b["thinking"].strip())))
+            elif t == "redacted_thinking" and not self.o.no_thinking:
+                self.add(self.claude, ts, "*[thinking redacted]*")
+            elif t in ("tool_use", "server_tool_use"):
+                self.tool_use(b, ts)
+
+    def tool_use(self, b, ts):
+        name, i = b.get("name", "tool"), b.get("input") or {}
+        self.calls[b.get("id")] = (name, ts)
+        self.stats["tool calls"] += 1
+        self.tools[name] += 1
+        summary = tool_summary(name, i)
+        if self.o.brief:
+            self.add(self.claude, ts, f"- {esc(summary)}")
+        else:
+            self.add(self.claude, ts, fold(f"Tool call: {summary} — {local_time(ts, False)}", tool_input(name, i)))
+
+    def tool_result(self, d, b, ts):
+        name, call_ts = self.calls.get(b.get("tool_use_id"), ("tool", None))
+        text = result_text(b)
+        is_error = bool(b.get("is_error"))
+        label = "Tool output"
+        if is_error:
+            self.stats["tool errors"] += 1
+            label = "Tool error"
+            if re.search(r"doesn't want to proceed|user (?:rejected|denied)|permission", text, re.I):
+                label = "Tool denied"
+        if self.o.brief:
+            if is_error:
+                first = text.strip().splitlines()[:1]
+                self.add(self.claude, ts, f"  - {label.lower()}: {esc(first[0][:200]) if first else ''}")
+            return
+        r = d.get("toolUseResult")
+        r = r if isinstance(r, dict) else {}
+        full, saved = persisted(text)
+        limit = self.o.max_output
+        if r.get("structuredPatch"):
+            body = fence(visible(patch_text(r["structuredPatch"])), "diff")
+            if r.get("userModified"):
+                body = "*You changed the proposed edit before accepting it.*\n\n" + body
+        elif r.get("type") == "create":
+            body = f"Created `{r.get('filePath', '')}` ({len(str(r.get('content', '')).splitlines())} lines)."
+        elif full is not None:
+            body = f"Full output, read from `{saved}`:\n\n" + fence(visible(clip(full, limit)), "text")
+        elif ("stdout" in r or "stderr" in r) and not is_error:
+            out, err = r.get("stdout") or "", r.get("stderr") or ""
+            body = fence(visible(clip(out, limit)), "text") if out.strip() else ""
+            if err.strip():
+                body += ("\n\nstderr:\n\n" if body else "stderr:\n\n") + fence(visible(clip(err, limit)), "text")
+            if r.get("interrupted"):
+                body += "\n\n*Interrupted.*"
+            if r.get("backgroundTaskId"):
+                body += f"\n\n*Running in the background as {r['backgroundTaskId']}.*"
+            body = body.strip() or "*(no output)*"
+        else:
+            body = fence(visible(clip(text, limit)), "text") if text.strip() else "*(no output)*"
+        agent_id = r.get("agentId")
+        if agent_id and agent_id in self.subagents:
+            body += f"\n\nThe subagent's own transcript is under *Subagent {agent_id[:8]}* below."
+        took = duration(seconds_between(call_ts, ts)) if call_ts else ""
+        meta = " — ".join(x for x in (local_time(ts, False), took) if x)
+        self.add(self.claude, ts, fold(f"{label}: {name} — {meta}", body))
+
+    # --- harness -----------------------------------------------------------
+
+    def system(self, d, ts):
+        sub = d.get("subtype")
+        if sub == "turn_duration":
+            self.event(ts, f"Turn took {duration((d.get('durationMs') or 0) / 1000)}"
+                           f" ({d.get('messageCount', '?')} messages)")
+        elif sub == "away_summary":
+            self.event(ts, f"Recap shown: {esc(str(d.get('content', '')))}")
+        elif sub == "compact_boundary":
+            m = d.get("compactMetadata") or {}
+            self.stats["compactions"] += 1
+            self.event(ts, f"Context compacted ({m.get('trigger', '?')}): {m.get('preTokens', 0):,} → "
+                           f"{m.get('postTokens', 0):,} tokens in {duration((m.get('durationMs') or 0) / 1000)}")
+        elif sub == "stop_hook_summary":
+            errs = d.get("hookErrors") or []
+            if errs or d.get("preventedContinuation"):
+                self.event(ts, f"Stop hook: {esc(json.dumps(errs)[:300])}"
+                               + (" (prevented continuing)" if d.get("preventedContinuation") else ""))
+        elif sub == "local_command":
+            self.user_text(d, ts, str(d.get("content", "")))
+        elif sub == "model_refusal_no_fallback":
+            self.event(ts, f"Model refused ({d.get('apiRefusalCategory', '?')}):"
+                           f" {esc(str(d.get('apiRefusalExplanation', '')))}")
+        else:
+            content = str(d.get("content") or "").strip()
+            self.event(ts, f"System ({sub}){': ' + esc(content[:300]) if content else ''}")
+
+    def attachment(self, a, ts):
+        t = a.get("type")
+        if t in QUIET_ATTACHMENTS:
+            return
+        if t == "environment":
+            snap = a.get("snapshot") or {}
+            if self.env is not None:
+                changed = [f"{k}: {self.env.get(k)!r} → {v!r}" for k, v in snap.items()
+                           if k != "scratchpadDirectory" and self.env.get(k) != v]
+                if changed:
+                    self.event(ts, "Environment changed: " + esc("; ".join(changed)))
+            self.env = snap
+        elif t == "model":
+            ident = a.get("identity") or {}
+            self.event(ts, f"Model: {ident.get('marketingName', '')} (`{ident.get('modelId', '')}`)")
+        elif t == "instructions":
+            paths = [f.get("path", "") for f in a.get("files", [])]
+            if paths:
+                self.event(ts, "Instructions loaded from " + ", ".join(f"`{p}`" for p in paths))
+        elif t == "silent_turn_reminder":
+            self.event(ts, f"Harness nudge: {esc(a.get('text', ''))}")
+        elif t == "edited_text_file":
+            self.event(ts, f"File changed outside Claude: `{a.get('filename', '')}`")
+        elif t == "date":
+            self.event(ts, f"Date: {a.get('date', '')}")
+        elif t == "auto_mode":
+            self.event(ts, "Auto mode on")
+        elif t == "queued_command":
+            self.stats["prompts"] += 1
+            self.add(self.you, ts, "*(sent while Claude was working)*\n\n" + prose(str(a.get("prompt", ""))))
+        elif t in ("hook_additional_context", "hook_system_message"):
+            content = a.get("content")
+            content = " ".join(map(str, content)) if isinstance(content, list) else str(content or "")
+            self.event(ts, f"Hook {a.get('hookName', '')}: {esc(content[:300])}")
+        elif t == "hook_cancelled":
+            self.event(ts, f"Hook {a.get('hookName', '')} cancelled")
+        elif t in ("file", "compact_file_reference"):
+            how = "kept after compaction" if t == "compact_file_reference" else "added to context"
+            self.event(ts, f"File {how}: `{a.get('displayPath') or a.get('filename', '')}`")
+        elif t == "plan_mode":
+            if not self.plan:
+                self.plan = True
+                self.event(ts, "Plan mode on")
+        elif t == "plan_mode_exit":
+            self.plan = False
+            self.event(ts, "Plan mode off")
+        elif t == "plan_file_reference":
+            path = a.get("planFilePath", "")
+            if path not in self.once:
+                self.once.add(path)
+                self.event(ts, f"Plan file: `{path}`")
+        elif t == "command_permissions":
+            self.event(ts, "Tools allowed for this command: " + ", ".join(map(str, a.get("allowedTools", []))))
+        else:
+            self.event(ts, f"Attachment: {esc(str(t))}")
 
 
-def main():
+def header(path, records, r, sub_count):
+    stamped = [x for x in records if x.get("timestamp")]
+    first = stamped[0]["timestamp"] if stamped else None
+    last = stamped[-1]["timestamp"] if stamped else None
+    cwd = next((x.get("cwd") for x in records if x.get("cwd")), str(Path.cwd()))
+    versions = sorted({x["version"] for x in records if x.get("version")})
+    branches = sorted({x["gitBranch"] for x in records if x.get("gitBranch") and x["gitBranch"] != "HEAD"})
+    models = sorted({(x.get("message") or {}).get("model") for x in records if x.get("type") == "assistant"}
+                    - {None, "<synthetic>"})
+    cost = next((x for x in reversed(records) if x.get("type") == "cost-state"), None)
+    now = dt.datetime.now().astimezone().isoformat(timespec="seconds")
+    s = r.stats
+    lines = [
+        f"Session `{path.stem}`. Exported {now}.",
+        f"Working directory: `{cwd}`",
+        f"Source: `{path}`",
+        f"Span: {local_time(first)} to {local_time(last)} ({duration(seconds_between(first, last))})",
+        f"Claude Code {', '.join(versions) or '?'}; models: {', '.join(f'`{m}`' for m in models) or '?'}"
+        + (f"; git branch: {', '.join(branches)}" if branches else ""),
+        f"{s['prompts']} prompts, {s['replies']} replies, {s['tool calls']} tool calls"
+        f" ({s['tool errors']} errors or denials), {sub_count} subagents, {s['compactions']} compactions.",
+    ]
+    if r.tools:
+        lines.append("Tools: " + ", ".join(f"{n} ×{c}" for n, c in r.tools.most_common()))
+    if cost:
+        lines.append(f"Cost ${cost.get('totalCostUSD', 0):.2f}; API time {duration((cost.get('totalAPIDuration') or 0) / 1000)},"
+                     f" tool time {duration((cost.get('totalToolDuration') or 0) / 1000)};"
+                     f" lines +{cost.get('totalLinesAdded', 0)} −{cost.get('totalLinesRemoved', 0)}.")
+        for model, u in (cost.get("modelUsage") or {}).items():
+            lines.append(f"`{model}`: {u.get('inputTokens', 0):,} in, {u.get('outputTokens', 0):,} out,"
+                         f" {u.get('cacheReadInputTokens', 0):,} cache read,"
+                         f" {u.get('cacheCreationInputTokens', 0):,} cache write, ${u.get('costUSD', 0):.2f}")
+    lines.append("Left out: the system prompt, instruction file contents, tool/skill/MCP listings and account details.")
+    return "\n\n".join(lines) + "\n"
+
+
+def subagent_files(path):
+    """Subagent transcripts beside the session, each with its .meta.json if present."""
+    found = {}
+    for f in sorted((path.parent / path.stem / "subagents").glob("agent-*.jsonl")):
+        meta = {}
+        try:
+            meta = json.loads(f.with_suffix(".meta.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            pass
+        found[f.stem[len("agent-"):]] = (f, meta)
+    return found
+
+
+def build(path, opts):
+    records = read_records(path)
+    subs = {} if (opts.brief or opts.no_subagents) else subagent_files(path)
+    r = Renderer(opts, subagents=subs)
+    for d in records:
+        if not d.get("isSidechain"):  # older versions kept subagents inline
+            r.record(d)
+    if not r.out:
+        raise ValueError(f"nothing to show in {path}; unsupported or empty session")
+
+    started = []
+    for agent_id, (f, meta) in subs.items():
+        recs = read_records(f)
+        start = next((x["timestamp"] for x in recs if x.get("timestamp")), "")
+        started.append((start, agent_id, f, meta, recs))
+    parts = []
+    for start, agent_id, f, meta, recs in sorted(started):
+        sr = Renderer(opts, level=3, you="Prompt", claude="Subagent")
+        for d in recs:
+            sr.record(d)
+        parts.append(f"\n## Subagent {agent_id[:8]}: {meta.get('description', '')} ({meta.get('agentType', 'agent')})\n\n"
+                     f"Started {local_time(start)}; {sr.stats['tool calls']} tool calls"
+                     f" ({sr.stats['tool errors']} errors or denials). Source: `{f}`\n" + "".join(sr.out))
+
+    cwd = next((x.get("cwd") for x in records if x.get("cwd")), str(Path.cwd()))
+    day = local_time(next((x["timestamp"] for x in records if x.get("timestamp")), ""))[:10] \
+        or dt.date.today().isoformat()
+    doc = (f"# Claude Code session, {Path(cwd).name}, {day}\n\n"
+           + header(path, records, r, len(subs)) + "".join(r.out) + "".join(parts))
+    return doc, day, r
+
+
+def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("session", nargs="?")
     ap.add_argument("-o", "--output")
-    ap.add_argument("--tools", action="store_true")
+    ap.add_argument("--brief", action="store_true")
     ap.add_argument("--no-thinking", action="store_true")
-    a = ap.parse_args()
-
-    cwd = Path.cwd()
-    path = Path(a.session) if a.session else latest_session(cwd)
-    first_ts, body = render(path, a.tools, not a.no_thinking)
-    day = (first_ts or dt.date.today().isoformat())[:10]
-    title = f"# Claude Code session, {cwd.name}, {day}\n\nSession `{path.stem}`, converted {dt.datetime.now():%Y-%m-%d %H:%M}.\n"
-    doc = title + body
-
-    if a.output == "-":
-        sys.stdout.write(doc)
-        return
-    target = Path(a.output or cwd / "_transcripts" / f"{day}-{cwd.name}-{path.stem[:8]}.md")
-    if not target.parent.is_dir():
-        target.parent.mkdir(parents=True)
-        print(f"cc-transcript: created {target.parent}", file=sys.stderr)
-    target.write_text(doc, encoding="utf-8")
-    print(f"cc-transcript: wrote {target}", file=sys.stderr)
+    ap.add_argument("--no-subagents", action="store_true")
+    ap.add_argument("--max-output", type=int, default=0)
+    ap.add_argument("--tools", action="store_true", help=argparse.SUPPRESS)  # old flag; now the default
+    a = ap.parse_args(argv)
+    try:
+        cwd = Path.cwd()
+        path = (Path(a.session).expanduser() if a.session else latest_session(cwd)).resolve()
+        doc, day, r = build(path, a)
+        if a.output == "-":
+            sys.stdout.write(doc)
+            return 0
+        target = Path(a.output).expanduser() if a.output else cwd / "_transcripts" / f"{day}-{cwd.name}-{path.stem[:8]}.md"
+        if target.resolve() == path:
+            raise ValueError("output must not overwrite the session file")
+        if not target.parent.is_dir():
+            target.parent.mkdir(parents=True)
+            print(f"cc-transcript: created {target.parent}", file=sys.stderr)
+        target.write_text(doc, encoding="utf-8")
+        print(f"cc-transcript: wrote {target} ({r.stats['prompts']} prompts, "
+              f"{r.stats['tool calls']} tool calls)", file=sys.stderr)
+        return 0
+    except (OSError, ValueError) as e:
+        print(f"cc-transcript: {e}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
