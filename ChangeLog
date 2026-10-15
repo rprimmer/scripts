@@ -2,8 +2,14 @@ This file has been automatically generated using the following command:
 
 	git log --pretty=format:'%h %d %ai - %s'
 
-ca3c54c  (HEAD -> main) 2026-09-04 17:51:07 -0400 - Add workspace spelling configuration
-f4bae50  (origin/main) 2026-09-04 17:50:22 -0400 - Update ChangeLog
+cf6b1e6  (HEAD -> main) 2026-10-15 14:22:59 -0400 - cc-transcript: record the whole session in detail by default
+bfab053  (origin/main, origin/HEAD) 2026-10-12 09:50:59 -0400 - Add cc-transcript: export a Claude Code session as Markdown
+ca8b5ed  2026-09-25 07:42:49 -0400 - Stop tracking VS Code and cspell config
+55601a3  2026-09-25 07:39:06 -0400 - Updated gitignore
+09efee0  2026-09-04 18:12:01 -0400 - Small changes
+8411f64  2026-09-04 17:51:28 -0400 - Update ChangeLog
+ca3c54c  2026-09-04 17:51:07 -0400 - Add workspace spelling configuration
+f4bae50  2026-09-04 17:50:22 -0400 - Update ChangeLog
 6f41f17  2026-09-04 17:50:07 -0400 - Improve script safety and portability
 e67e4d9  2026-09-04 17:31:41 -0400 - Update ChangeLog
 62a9505  2026-09-04 17:31:24 -0400 - Use Homebrew Bash for launchd status check
