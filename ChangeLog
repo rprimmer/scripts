@@ -2,12 +2,14 @@ This file has been automatically generated using the following command:
 
 	git log --pretty=format:'%h %d %ai - %s'
 
-e94d153  (HEAD -> main) 2026-10-15 14:25:01 -0400 - Add small utility scripts
+3a9bf17  (HEAD -> main, origin/main, origin/HEAD) 2026-10-15 18:08:47 -0400 - Add asm-listing.sh: C source interleaved with its ARM64 disassembly
+21df685  2026-10-15 14:25:01 -0400 - Update ChangeLog
+e94d153  2026-10-15 14:25:01 -0400 - Add small utility scripts
 cd0134a  2026-10-15 14:25:01 -0400 - Add codex-transcript: export a Codex session as Markdown
 e051e53  2026-10-15 14:25:01 -0400 - Write link_scripts.sh logs to _logs/ and ignore it
 4b76dd6  2026-10-15 14:24:17 -0400 - Update ChangeLog
 cf6b1e6  2026-10-15 14:22:59 -0400 - cc-transcript: record the whole session in detail by default
-bfab053  (origin/main, origin/HEAD) 2026-10-12 09:50:59 -0400 - Add cc-transcript: export a Claude Code session as Markdown
+bfab053  2026-10-12 09:50:59 -0400 - Add cc-transcript: export a Claude Code session as Markdown
 ca8b5ed  2026-09-25 07:42:49 -0400 - Stop tracking VS Code and cspell config
 55601a3  2026-09-25 07:39:06 -0400 - Updated gitignore
 09efee0  2026-09-04 18:12:01 -0400 - Small changes
