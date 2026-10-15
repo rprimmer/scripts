@@ -1,0 +1,233 @@
+#!/usr/bin/env python3
+"""Export a local Codex session as Markdown, preserving message formatting.
+
+usage:
+  codex-transcript                 latest main session for the current directory
+  codex-transcript SESSION.jsonl   a specific session, including an archived one
+options:
+  -o FILE       output path (default: ./_transcripts/DATE-PROJECT-ID.md)
+  -o -          write to standard output
+  --tools       include recorded tool inputs and outputs in folded blocks
+
+Without --tools, tool calls appear as short summaries. Internal reasoning,
+system/developer instructions, and injected environment context are omitted.
+The local JSONL format is version-dependent; no Codex files are modified.
+"""
+
+import argparse
+import datetime as dt
+import html
+import json
+import os
+from pathlib import Path
+import re
+import sys
+
+
+def fence(text, language=""):
+    longest = max((len(m) for m in re.findall(r"`{3,}", text)), default=2)
+    delimiter = "`" * (longest + 1)
+    return f"{delimiter}{language}\n{text}\n{delimiter}"
+
+
+def metadata(path):
+    with path.open(encoding="utf-8") as stream:
+        first = json.loads(stream.readline())
+    if first.get("type") != "session_meta":
+        raise ValueError(f"no session_meta header in {path}")
+    return first.get("payload", {})
+
+
+def latest_session(cwd, session_root):
+    """Read only headers while finding the newest matching main session."""
+    files = sorted(session_root.rglob("*.jsonl"),
+                   key=lambda path: (path.stat().st_mtime_ns, str(path)), reverse=True)
+    for path in files:
+        try:
+            meta = metadata(path)
+        except (OSError, ValueError):
+            continue
+        source = meta.get("source", {})
+        if isinstance(source, dict) and "subagent" in source:
+            continue
+        if meta.get("cwd") and Path(meta["cwd"]).resolve() == cwd.resolve():
+            return path
+    raise ValueError(f"no main sessions for {cwd} under {session_root}; "
+                     "pass a SESSION.jsonl path explicitly")
+
+
+def read_records(path):
+    """Take a bounded snapshot, tolerating an unfinished final JSON record."""
+    with path.open("rb") as stream:
+        size = os.fstat(stream.fileno()).st_size
+        lines = stream.read(size).splitlines(keepends=True)
+    records = []
+    for number, line in enumerate(lines, 1):
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except (ValueError, UnicodeDecodeError) as error:
+            if number == len(lines) and not line.endswith(b"\n"):
+                print("codex-transcript: skipped an unfinished final record; "
+                      "rerun after the session finishes writing", file=sys.stderr)
+                break
+            raise ValueError(f"invalid JSON at {path}:{number}") from error
+        if not isinstance(record, dict):
+            raise ValueError(f"expected a JSON object at {path}:{number}")
+        records.append(record)
+    return records
+
+
+def text_content(content, clean_user=False):
+    if isinstance(content, str):
+        return clean_user_text(content) if clean_user else content
+    if not isinstance(content, list):
+        return json.dumps(content, ensure_ascii=False, indent=2)
+    parts = []
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        kind = block.get("type", "unknown")
+        if kind in ("text", "input_text", "output_text"):
+            value = block.get("text", "")
+            value = clean_user_text(value) if clean_user else value
+            if value:
+                parts.append(value)
+        else:
+            parts.append(f"[Non-text attachment: {kind}; not embedded in Markdown]")
+    return "\n\n".join(parts)
+
+
+def clean_user_text(text):
+    """Remove known harness-only prefixes, preserving any following request."""
+    text = re.sub(
+        r"\A# AGENTS\.md instructions for [^\n]*\n\s*"
+        r"<INSTRUCTIONS>.*?</INSTRUCTIONS>\s*", "", text, flags=re.S)
+    text = re.sub(r"\A\s*<environment_context>.*?</environment_context>\s*",
+                  "", text, flags=re.S)
+    return text
+
+
+def tool_input(item):
+    value = item.get("arguments", item.get("input", ""))
+    if not isinstance(value, str):
+        return json.dumps(value, ensure_ascii=False, indent=2), "json"
+    try:
+        decoded = json.loads(value)
+    except ValueError:
+        language = "javascript" if item.get("name", "").split(".")[-1] == "exec" else "text"
+        return value, language
+    return json.dumps(decoded, ensure_ascii=False, indent=2), "json"
+
+
+def tool_summary(item):
+    value = item.get("arguments", item.get("input", ""))
+    try:
+        decoded = json.loads(value) if isinstance(value, str) else value
+    except ValueError:
+        decoded = value
+    if isinstance(decoded, dict):
+        detail = next((decoded[key] for key in ("cmd", "command", "path", "file_path")
+                       if decoded.get(key)), "")
+    else:
+        detail = str(decoded)
+    detail = str(detail).splitlines()[0][:160] if detail else ""
+    return html.escape(detail)
+
+
+def render(records, include_tools=False):
+    parts, calls, seen_ids = [], {}, set()
+    message_count = tool_count = 0
+    for record in records:
+        # event_msg mirrors many response_item messages; exporting both duplicates them.
+        if record.get("type") != "response_item":
+            continue
+        item = record.get("payload", {})
+        kind = item.get("type")
+        item_id = item.get("id")
+        if item_id:
+            key = (kind, item_id)
+            if key in seen_ids:
+                continue
+            seen_ids.add(key)
+        timestamp = record.get("timestamp", "")
+        if kind == "message":
+            role = item.get("role")
+            if role not in ("user", "assistant"):
+                continue
+            if item.get("phase") in ("analysis", "summary") or item.get("channel") in ("analysis", "summary"):
+                continue
+            text = text_content(item.get("content", []), clean_user=role == "user")
+            if not text.strip():
+                continue
+            who = "You" if role == "user" else "Codex"
+            phase = " (progress)" if item.get("phase") == "commentary" else ""
+            parts.append(f"## {who}{phase} — {timestamp}\n\n{text}")
+            message_count += 1
+        elif kind in ("function_call", "custom_tool_call"):
+            name = item.get("name", "tool")
+            calls[item.get("call_id")] = name
+            tool_count += 1
+            if include_tools:
+                value, language = tool_input(item)
+                title = html.escape(f"Tool call: {name} — {timestamp}")
+                parts.append(f"<details><summary>{title}</summary>\n\n"
+                             f"{fence(value, language)}\n\n</details>")
+            else:
+                parts.append(f"- Tool: `{name}` — {tool_summary(item)}")
+        elif kind in ("function_call_output", "custom_tool_call_output") and include_tools:
+            name = calls.get(item.get("call_id"), "tool")
+            value = text_content(item.get("output", ""))
+            title = html.escape(f"Tool output: {name} — {timestamp}")
+            parts.append(f"<details><summary>{title}</summary>\n\n"
+                         f"{fence(value, 'text')}\n\n</details>")
+        # reasoning records, compaction context, and internal metadata stay private.
+    if not message_count:
+        raise ValueError("no visible response_item messages found; unsupported or empty session")
+    return "\n\n".join(parts) + "\n", message_count, tool_count
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("session", nargs="?")
+    parser.add_argument("-o", "--output")
+    parser.add_argument("--tools", action="store_true")
+    args = parser.parse_args(argv)
+    try:
+        codex_root = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex")))
+        source = Path(args.session).expanduser() if args.session else latest_session(Path.cwd(), codex_root / "sessions")
+        source = source.resolve()
+        meta = metadata(source)
+        records = read_records(source)
+        body, messages, tool_calls = render(records, args.tools)
+        session_id = meta.get("id", source.stem)
+        project = Path(meta.get("cwd", str(Path.cwd()))).name
+        day = str(meta.get("timestamp") or records[0].get("timestamp") or dt.date.today())[:10]
+        now = dt.datetime.now().astimezone().isoformat(timespec="seconds")
+        document = (f"# Codex session, {project}, {day}\n\n"
+                    f"Session `{session_id}`. Exported {now}.\n\n"
+                    f"Working directory: `{meta.get('cwd', '')}`\n\n"
+                    f"Source: `{source}`\n\n"
+                    f"{messages} visible messages; {tool_calls} recorded tool calls. "
+                    "System/developer instructions, injected context, internal reasoning, "
+                    "and duplicate event records are omitted. Non-text attachments are placeholders. "
+                    "This is a snapshot; later messages require another export.\n\n" + body)
+        if args.output == "-":
+            sys.stdout.write(document)
+            return 0
+        safe_project = re.sub(r"[^\w.-]+", "-", project)
+        target = Path(args.output).expanduser() if args.output else Path.cwd() / "_transcripts" / f"{day}-{safe_project}-{session_id[:8]}.md"
+        if target.resolve() == source:
+            raise ValueError("output must not overwrite the source session")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(document, encoding="utf-8")
+        print(f"codex-transcript: wrote {target} ({messages} messages, {tool_calls} tool calls)", file=sys.stderr)
+        return 0
+    except (OSError, ValueError) as error:
+        print(f"codex-transcript: {error}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
