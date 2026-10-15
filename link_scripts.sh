@@ -6,7 +6,7 @@ EXTENSIONS=("py" "sh")
 SCRIPTS_DIR="${SCRIPTS_DIR:-$HOME/src/scripts}"
 LOCAL_BIN="${LOCAL_BIN:-$HOME/bin}"
 PROGRAM_NAME=$(basename "$0")
-LOG_FILE="${SCRIPTS_DIR}/${PROGRAM_NAME}-$(date +%Y%m%d-%H%M%S).log"
+LOG_FILE="${SCRIPTS_DIR}/_logs/${PROGRAM_NAME}-$(date +%Y%m%d-%H%M%S).log"
 declare -i delete_logs=0 keep_logs=0 overwrite=0
 
 usage() {

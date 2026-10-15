@@ -1,6 +1,8 @@
-examples
-specs
+examples/
+specs/
 foo
 link_scripts.sh-*
-.vscode
-.cspell
+.vscode/
+.cspell/
+_logs/
+.DS_Store
