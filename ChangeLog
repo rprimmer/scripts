@@ -2,7 +2,9 @@ This file has been automatically generated using the following command:
 
 	git log --pretty=format:'%h %d %ai - %s'
 
-3a9bf17  (HEAD -> main, origin/main, origin/HEAD) 2026-10-15 18:08:47 -0400 - Add asm-listing.sh: C source interleaved with its ARM64 disassembly
+550042d  (HEAD -> main) 2026-10-16 06:41:21 -0400 - asm-listing.sh: default to -O0
+8ea26cf  (origin/main, origin/HEAD) 2026-10-15 18:20:08 -0400 - Update ChangeLog
+3a9bf17  2026-10-15 18:08:47 -0400 - Add asm-listing.sh: C source interleaved with its ARM64 disassembly
 21df685  2026-10-15 14:25:01 -0400 - Update ChangeLog
 e94d153  2026-10-15 14:25:01 -0400 - Add small utility scripts
 cd0134a  2026-10-15 14:25:01 -0400 - Add codex-transcript: export a Codex session as Markdown
