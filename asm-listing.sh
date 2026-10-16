@@ -6,14 +6,14 @@
 #
 # What it runs, and why each flag is there:
 #
-#   clang -O2 -g -c foo.c -o foo.o
+#   clang -O0 -g -c foo.c -o foo.o
+#       -O0  do not optimize the C code (e.g., with -O2) as it makes the resulting assembly harder to follow
 #       -g   record which C line each instruction came from (needed by --source)
 #       -c   compile to an object file only; don't link
 #
 #   objdump -d -r --source --no-show-raw-insn foo.o | sed 's|;|//|' > foo.lst
 #       -d                  disassemble the code
-#       -r                  name the function each call goes to (bl _bzero,
-#                           not bl 0x1f8)
+#       -r                  name the function each call goes to (bl _bzero, not bl 0x1f8)
 #       --source            print the C lines above their instructions
 #       --no-show-raw-insn  hide each instruction's hex encoding
 #       sed 's|;|//|'       Apple's assembler comments start with ';', but
@@ -22,9 +22,9 @@
 #                           their own semicolons.
 #
 # Related commands worth remembering:
-#   clang -O2 -S foo.c              plain assembly in foo.s (no C source;
+#   clang -O0 -S foo.c              plain assembly in foo.s (no C source;
 #                                   -fverbose-asm adds nothing, it is the default)
-#   clang -O2 -S -o - foo.c         the same, to the terminal
+#   clang -O0 -S -o - foo.c         the same, to the terminal
 #   godbolt.org                     the same idea in a browser, any compiler
 #
 # At -O2 the compiler reorders code, so C lines can appear out of order or
@@ -37,8 +37,8 @@ usage() {
 usage: $(basename "$0") [-o OUT.lst] FILE.c [COMPILER FLAGS...]
 
 Writes FILE.lst next to FILE.c: the disassembly with the C source between
-the instructions. Compiler flags default to -O2; any given replace it
-(e.g. $(basename "$0") foo.c -O0).
+the instructions. Compiler flags default to -O0; any given replace it
+(e.g. $(basename "$0") foo.c -O2).
 
 options:
   -o OUT   write the listing here instead (- for standard output)
@@ -76,7 +76,7 @@ for f in "${flags[@]}"; do
     fi
 done
 if [[ ${#flags[@]} -eq 0 ]]; then
-    flags=(-O2)
+    flags=(-O0)
 fi
 out=${out:-${src%.*}.lst}
 
