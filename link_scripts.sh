@@ -111,6 +111,12 @@ parse_args() {
 main() {
     parse_args "$@"
 
+    # _logs/ is git-ignored, so a fresh clone doesn't have it
+    if ! mkdir -p "${LOG_FILE%/*}"; then
+        echo "Failed to create directory: ${LOG_FILE%/*}" >&2
+        exit 1
+    fi
+
     if (( ! keep_logs )); then
         delete_existing_logs
     fi
