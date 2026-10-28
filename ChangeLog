@@ -2,7 +2,9 @@ This file has been automatically generated using the following command:
 
 	git log --pretty=format:'%h %d %ai - %s'
 
-fbf19b6  (HEAD -> main) 2026-10-28 15:36:14 -0400 - link_scripts.sh: also link executables without a listed extension
+78832f3  (HEAD -> main) 2026-10-28 15:39:15 -0400 - link_scripts.sh: make -d delete the logs in _logs/
+8052c8c  2026-10-28 15:36:15 -0400 - Update ChangeLog
+fbf19b6  2026-10-28 15:36:14 -0400 - link_scripts.sh: also link executables without a listed extension
 8b600e6  2026-10-28 15:35:49 -0400 - link_scripts.sh: create _logs/ before logging
 9d08b56  (origin/main, origin/HEAD) 2026-10-16 06:41:21 -0400 - Update ChangeLog
 550042d  2026-10-16 06:41:21 -0400 - asm-listing.sh: default to -O0
