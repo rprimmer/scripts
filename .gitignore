@@ -5,6 +5,7 @@ bin/
 .claude/
 
 # This repository
+_archive/
 examples/
 foo
 link_scripts.sh-*

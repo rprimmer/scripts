@@ -1,0 +1,11 @@
+#! /bin/csh
+# Purpose:  sort file <argument-1> in place.
+
+if ($#argv == 0) then
+  echo "usage: `basename $0` <filename>"
+  exit 1
+endif
+
+set SFILE = $argv[1]
+
+sort -d -o $SFILE $SFILE
