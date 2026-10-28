@@ -92,9 +92,11 @@ scan_dir() {
 
 delete_existing_logs() {
     local file
-    for file in "$SCRIPTS_DIR"/"$PROGRAM_NAME"-*.log; do 
-        [[ -f "$file" ]] || continue 
-        if (( delete_logs )); then  
+    for file in "${LOG_FILE%/*}"/"$PROGRAM_NAME"-*.log; do
+        [[ -f "$file" ]] || continue
+        # A run in the same second shares this run's log name
+        [[ "$file" == "$LOG_FILE" ]] && continue
+        if (( delete_logs )); then
             rm -f "$file"
             echo_and_log "Log file $file deleted."
         fi

@@ -44,4 +44,12 @@ check "existing link kept"          test "$(readlink "$bin/kept.sh")" = /dev/nul
 SCRIPTS_DIR=$src LOCAL_BIN=$bin "$script" -k -o >/dev/null 2>&1
 check "-o replaces existing link"   test "$(readlink "$bin/kept.sh")" = "$src/kept.sh"
 
+old="$src/_logs/link_scripts.sh-20000101-000000.log"
+: > "$old"
+SCRIPTS_DIR=$src LOCAL_BIN=$bin "$script" >/dev/null 2>&1
+check "old log kept without -d"     test -e "$old"
+SCRIPTS_DIR=$src LOCAL_BIN=$bin "$script" -d >/dev/null 2>&1
+check "-d deletes old log"          test ! -e "$old"
+check "-d keeps this run's log"     test "$(grep -l "Log file $old deleted" "$src"/_logs/*.log | wc -l)" -eq 1
+
 exit $fail
