@@ -1,5 +1,11 @@
+# In every repository
+_attic/
+_transcripts/
+bin/
+.claude/
+
+# This repository
 examples/
-specs/
 foo
 link_scripts.sh-*
 .vscode/
