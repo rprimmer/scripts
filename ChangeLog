@@ -2,13 +2,15 @@ This file has been automatically generated using the following command:
 
 	git log --pretty=format:'%h %d %ai - %s'
 
-c2cfb3c  (HEAD -> main) 2026-10-28 15:42:08 -0400 - .gitignore: add the standard entries, drop specs/
+8cc013b  (HEAD -> main) 2026-10-28 16:01:40 -0400 - Add the seven scripts from linux/bin
+b52f8c8  (origin/main, origin/HEAD) 2026-10-28 15:42:08 -0400 - Update ChangeLog
+c2cfb3c  2026-10-28 15:42:08 -0400 - .gitignore: add the standard entries, drop specs/
 4d41d27  2026-10-28 15:39:15 -0400 - Update ChangeLog
 78832f3  2026-10-28 15:39:15 -0400 - link_scripts.sh: make -d delete the logs in _logs/
 8052c8c  2026-10-28 15:36:15 -0400 - Update ChangeLog
 fbf19b6  2026-10-28 15:36:14 -0400 - link_scripts.sh: also link executables without a listed extension
 8b600e6  2026-10-28 15:35:49 -0400 - link_scripts.sh: create _logs/ before logging
-9d08b56  (origin/main, origin/HEAD) 2026-10-16 06:41:21 -0400 - Update ChangeLog
+9d08b56  2026-10-16 06:41:21 -0400 - Update ChangeLog
 550042d  2026-10-16 06:41:21 -0400 - asm-listing.sh: default to -O0
 8ea26cf  2026-10-15 18:20:08 -0400 - Update ChangeLog
 3a9bf17  2026-10-15 18:08:47 -0400 - Add asm-listing.sh: C source interleaved with its ARM64 disassembly
