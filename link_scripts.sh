@@ -23,6 +23,8 @@ usage: $(basename "$0") [options]
 
 INFO
     This script creates soft links in a local bin dir to a shared scripts dir.
+    Files with a listed extension (${EXTENSIONS[*]}) are made executable and linked;
+    other files are linked only if already executable.
     Default values:
       LOCAL_BIN:    $LOCAL_BIN
       SCRIPTS_DIR:  $SCRIPTS_DIR
@@ -77,10 +79,14 @@ scan_dir() {
         filename=$(basename "$file")
         local extension="${filename##*.}"
 
+        # Listed extensions are made executable; any other file is linked
+        # only if it already is (cc-transcript, mdnumber and the like)
         if [[ " ${EXTENSIONS[*]} " == *" $extension "* ]]; then
             chmod +x "$file"
-            create_soft_link "$file" "$LOCAL_BIN/$filename" 
+        elif [[ ! -x "$file" ]]; then
+            continue
         fi
+        create_soft_link "$file" "$LOCAL_BIN/$filename"
     done
 }
 
