@@ -2,8 +2,11 @@ This file has been automatically generated using the following command:
 
 	git log --pretty=format:'%h %d %ai - %s'
 
-550042d  (HEAD -> main) 2026-10-16 06:41:21 -0400 - asm-listing.sh: default to -O0
-8ea26cf  (origin/main, origin/HEAD) 2026-10-15 18:20:08 -0400 - Update ChangeLog
+fbf19b6  (HEAD -> main) 2026-10-28 15:36:14 -0400 - link_scripts.sh: also link executables without a listed extension
+8b600e6  2026-10-28 15:35:49 -0400 - link_scripts.sh: create _logs/ before logging
+9d08b56  (origin/main, origin/HEAD) 2026-10-16 06:41:21 -0400 - Update ChangeLog
+550042d  2026-10-16 06:41:21 -0400 - asm-listing.sh: default to -O0
+8ea26cf  2026-10-15 18:20:08 -0400 - Update ChangeLog
 3a9bf17  2026-10-15 18:08:47 -0400 - Add asm-listing.sh: C source interleaved with its ARM64 disassembly
 21df685  2026-10-15 14:25:01 -0400 - Update ChangeLog
 e94d153  2026-10-15 14:25:01 -0400 - Add small utility scripts
